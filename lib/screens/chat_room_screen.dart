@@ -18,9 +18,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Timeline? _timeline;
   bool _isLoading = true;
   bool _isSending = false;
-  bool _isSyncing = false;
   StreamSubscription? _updateSub;
-  StreamSubscription? _syncSub;
 
   @override
   void initState() {
@@ -28,18 +26,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _loadTimeline();
     // Слушаем обновления комнаты
     _updateSub = widget.room.onUpdate.stream.listen((_) => _onRoomUpdate());
-    // Слушаем статус синхронизации
-    _syncSub = widget.matrixService.client.onSync.stream.listen((_) {
-      if (mounted) {
-        setState(() { _isSyncing = widget.matrixService.client.syncPending; });
-      }
-    });
   }
 
   @override
   void dispose() {
     _updateSub?.cancel();
-    _syncSub?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -135,26 +126,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       ),
       body: Column(
         children: [
-          // Индикатор статуса синхронизации
-          if (_isSyncing)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              color: Colors.indigo[100],
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  SizedBox(width: 8),
-                  Text("Синхронизация...", style: TextStyle(fontSize: 12)),
-                ],
-              ),
-            ),
-
           // Сообщения
           Expanded(
             child: _isLoading
