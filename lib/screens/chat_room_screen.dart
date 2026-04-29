@@ -83,9 +83,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Future<void> _requestMoreHistory() async {
     if (_timeline == null || !_canLoadMoreHistory) return;
     try {
-      final result = await _timeline!.requestHistory();
-      // Если вернулось 0 событий — история кончилась
-      if (result == 0) {
+      final countBefore = _timeline!.events.length;
+      await _timeline!.requestHistory();
+      final countAfter = _timeline!.events.length;
+      // Если количество событий не изменилось — история кончилась
+      if (countAfter == countBefore) {
         _canLoadMoreHistory = false;
       }
     } catch (e) {
