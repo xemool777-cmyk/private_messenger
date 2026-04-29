@@ -533,46 +533,50 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
-  /// Попробовать ВСЕ методы загрузки по очереди
+  /// Загрузка картинки — пробуем методы по очереди
+  /// 
+  /// КЛЮЧЕВОЕ: Conduit включил MSC3916 (authenticated media).
+  /// Старый endpoint /_matrix/media/v3/download/ возвращает M_NOT_FOUND.
+  /// Нужен /_matrix/client/v1/media/download/ с Authorization header!
   Future<MatrixFile?> _loadImageAllMethods(Event event) async {
     final isEncrypted = _isEncryptedMedia(event);
     debugPrint("[IMAGE] Event ${event.eventId}, encrypted=$isEncrypted, mxc=${event.attachmentMxcUrl}");
 
-    // Метод 1: SDK downloadAndDecryptAttachment — работает и для зашифрованных
+    // Метод 1: /_matrix/client/v1/media/download/ с Authorization (MSC3916)
+    // Это ПРАВИЛЬНЫЙ endpoint для новых версий Conduit!
     try {
-      debugPrint("[IMAGE] Method 1: SDK downloadAndDecryptAttachment");
-      final file = await event.downloadAndDecryptAttachment();
-      debugPrint("[IMAGE] Method 1 OK: ${file.bytes.length} bytes, hex: ${_hexDump(file.bytes)}");
-
-      if (_looksLikeImage(file.bytes)) {
-        debugPrint("[IMAGE] Method 1: bytes look like image ✓");
-        return file;
-      } else {
-        debugPrint("[IMAGE] Method 1: bytes NOT a valid image, trying next method");
+      debugPrint("[IMAGE] Method 1: client/v1/media/download (MSC3916)");
+      final bytes = await _authenticatedMediaDownload(event);
+      if (bytes != null && _looksLikeImage(bytes)) {
+        debugPrint("[IMAGE] Method 1 OK: ${bytes.length} bytes ✓");
+        return MatrixFile(bytes: bytes, name: event.body ?? 'image');
+      } else if (bytes != null) {
+        debugPrint("[IMAGE] Method 1: got ${bytes.length} bytes but NOT image, hex: ${_hexDump(bytes)}");
       }
     } catch (e) {
       debugPrint("[IMAGE] Method 1 FAILED: $e");
     }
 
-    // Метод 2: HTTP через access_token в URL параметре
-    // (Conduit может не принимать Authorization header при редиректе)
+    // Метод 2: SDK downloadAndDecryptAttachment (для зашифрованных)
     try {
-      debugPrint("[IMAGE] Method 2: HTTP with token in URL");
-      final bytes = await _httpDownloadWithTokenInUrl(event);
-      if (bytes != null && _looksLikeImage(bytes)) {
-        debugPrint("[IMAGE] Method 2 OK: ${bytes.length} bytes ✓");
-        return MatrixFile(bytes: bytes, name: event.body ?? 'image');
-      } else if (bytes != null) {
-        debugPrint("[IMAGE] Method 2: got ${bytes.length} bytes but NOT image, hex: ${_hexDump(bytes)}");
+      debugPrint("[IMAGE] Method 2: SDK downloadAndDecryptAttachment");
+      final file = await event.downloadAndDecryptAttachment();
+      debugPrint("[IMAGE] Method 2 OK: ${file.bytes.length} bytes, hex: ${_hexDump(file.bytes)}");
+
+      if (_looksLikeImage(file.bytes)) {
+        debugPrint("[IMAGE] Method 2: bytes look like image ✓");
+        return file;
+      } else {
+        debugPrint("[IMAGE] Method 2: bytes NOT a valid image, trying next method");
       }
     } catch (e) {
       debugPrint("[IMAGE] Method 2 FAILED: $e");
     }
 
-    // Метод 3: HTTP с Authorization header + badCertificate
+    // Метод 3: Старый media/v3 с токеном в URL (фоллбэк для старых серверов)
     try {
-      debugPrint("[IMAGE] Method 3: HTTP with auth header");
-      final bytes = await _httpDownloadWithAuthHeader(event);
+      debugPrint("[IMAGE] Method 3: media/v3 with token in URL");
+      final bytes = await _legacyMediaDownload(event);
       if (bytes != null && _looksLikeImage(bytes)) {
         debugPrint("[IMAGE] Method 3 OK: ${bytes.length} bytes ✓");
         return MatrixFile(bytes: bytes, name: event.body ?? 'image');
@@ -587,8 +591,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     return null;
   }
 
-  /// HTTP скачивание — access_token в URL параметре
-  Future<Uint8List?> _httpDownloadWithTokenInUrl(Event event) async {
+  /// ГЛАВНЫЙ МЕТОД: Authenticated Media Download (MSC3916)
+  /// Conduit требует /_matrix/client/v1/media/download/ с Bearer token
+  Future<Uint8List?> _authenticatedMediaDownload(Event event) async {
     final mxcUrl = event.attachmentMxcUrl;
     final homeserver = widget.matrixService.client.homeserver;
     final accessToken = widget.matrixService.client.accessToken;
@@ -597,40 +602,38 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final serverName = mxcUrl.host;
     final mediaId = mxcUrl.pathSegments.join('/');
 
-    // Пробуем v3 и v1 с токеном в URL
-    final urls = [
-      '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/download/$serverName/$mediaId?access_token=$accessToken',
-      '${homeserver.scheme}://${homeserver.host}/_matrix/media/v1/download/$serverName/$mediaId?access_token=$accessToken',
-    ];
+    // MSC3916 authenticated media endpoint
+    final url = '${homeserver.scheme}://${homeserver.host}/_matrix/client/v1/media/download/$serverName/$mediaId';
+    debugPrint("[IMAGE] MSC3916 URL: $url");
 
-    for (final url in urls) {
+    try {
+      final httpClient = HttpClient();
       try {
-        debugPrint("[IMAGE] HTTP token-in-URL: $url");
-        final httpClient = HttpClient();
-        try {
-          httpClient.badCertificateCallback = (cert, host, port) => true;
-          final request = await httpClient.getUrl(Uri.parse(url));
-          final response = await request.close();
+        httpClient.badCertificateCallback = (cert, host, port) => true;
+        final request = await httpClient.getUrl(Uri.parse(url));
+        request.headers.set('Authorization', 'Bearer $accessToken');
+        final response = await request.close();
 
-          if (response.statusCode == 200) {
-            final builder = await response.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d));
-            debugPrint("[IMAGE] HTTP token-in-URL OK: ${builder.length} bytes");
-            return builder.toBytes();
-          } else {
-            debugPrint("[IMAGE] HTTP token-in-URL status ${response.statusCode}");
-          }
-        } finally {
-          httpClient.close();
+        if (response.statusCode == 200) {
+          final builder = await response.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d));
+          debugPrint("[IMAGE] MSC3916 download OK: ${builder.length} bytes");
+          return builder.toBytes();
+        } else {
+          final body = await response.fold<String>('', (s, d) => s + String.fromCharCodes(d));
+          debugPrint("[IMAGE] MSC3916 status ${response.statusCode}: $body");
+          return null;
         }
-      } catch (e) {
-        debugPrint("[IMAGE] HTTP token-in-URL error: $e");
+      } finally {
+        httpClient.close();
       }
+    } catch (e) {
+      debugPrint("[IMAGE] MSC3916 error: $e");
+      return null;
     }
-    return null;
   }
 
-  /// HTTP скачивание — Authorization header
-  Future<Uint8List?> _httpDownloadWithAuthHeader(Event event) async {
+  /// Фоллбэк: старый media endpoint с токеном в URL
+  Future<Uint8List?> _legacyMediaDownload(Event event) async {
     final mxcUrl = event.attachmentMxcUrl;
     final homeserver = widget.matrixService.client.homeserver;
     final accessToken = widget.matrixService.client.accessToken;
@@ -640,13 +643,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final mediaId = mxcUrl.pathSegments.join('/');
 
     final urls = [
+      '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/download/$serverName/$mediaId?access_token=$accessToken',
       '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/download/$serverName/$mediaId',
-      '${homeserver.scheme}://${homeserver.host}/_matrix/media/v1/download/$serverName/$mediaId',
     ];
 
     for (final url in urls) {
       try {
-        debugPrint("[IMAGE] HTTP auth-header: $url");
+        debugPrint("[IMAGE] Legacy: $url");
         final httpClient = HttpClient();
         try {
           httpClient.badCertificateCallback = (cert, host, port) => true;
@@ -656,16 +659,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
           if (response.statusCode == 200) {
             final builder = await response.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d));
-            debugPrint("[IMAGE] HTTP auth-header OK: ${builder.length} bytes");
+            debugPrint("[IMAGE] Legacy OK: ${builder.length} bytes");
             return builder.toBytes();
           } else {
-            debugPrint("[IMAGE] HTTP auth-header status ${response.statusCode}");
+            debugPrint("[IMAGE] Legacy status ${response.statusCode}");
           }
         } finally {
           httpClient.close();
         }
       } catch (e) {
-        debugPrint("[IMAGE] HTTP auth-header error: $e");
+        debugPrint("[IMAGE] Legacy error: $e");
       }
     }
     return null;
@@ -777,10 +780,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text("Скачивание...")),
                 );
-                final file = await event.downloadAndDecryptAttachment();
+                // Пробуем MSC3916 endpoint, потом SDK
+                Uint8List? fileBytes;
+                final mxcUrl = event.attachmentMxcUrl;
+                if (mxcUrl != null) {
+                  final bytes = await _authenticatedMediaDownload(event);
+                  if (bytes != null) fileBytes = bytes;
+                }
+                fileBytes ??= (await event.downloadAndDecryptAttachment()).bytes;
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Скачано: ${file.name} (${_formatFileSize(file.bytes.length)})")),
+                    SnackBar(content: Text("Скачано: ${event.body ?? 'файл'} (${_formatFileSize(fileBytes.length)})")),
                   );
                 }
               } catch (e) {
