@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'package:image_picker/image_picker.dart';
@@ -22,6 +23,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _isLoading = true;
   bool _isSending = false;
   StreamSubscription? _updateSub;
+
+  // Кэш загруженных картинок, чтобы не перезагружать при скролле
+  final Map<String, Uint8List> _imageCache = {};
 
   @override
   void initState() {
@@ -420,10 +424,32 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
-  /// Виджет картинки (загрузка + отображение)
+  /// Виджет картинки с кэшем и фоллбэком
   Widget _buildImageWidget(Event event) {
+    final eventId = event.eventId;
+
+    // Проверяем кэш
+    if (_imageCache.containsKey(eventId)) {
+      return ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: min(MediaQuery.of(context).size.width * 0.65, 300),
+          maxHeight: 300,
+        ),
+        child: Image.memory(
+          _imageCache[eventId]!,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            width: 200,
+            height: 150,
+            color: Colors.grey[200],
+            child: const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+          ),
+        ),
+      );
+    }
+
     return FutureBuilder<MatrixFile>(
-      future: event.downloadAndDecryptAttachment(getThumbnail: true),
+      future: _loadImage(event),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Container(
@@ -436,16 +462,31 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           );
         }
         if (snapshot.hasError || !snapshot.hasData) {
+          // Фоллбэк: показать как файл если не удалось загрузить как картинку
           return Container(
             width: 200,
-            height: 150,
+            height: 80,
             color: Colors.grey[200],
-            child: const Center(
-              child: Icon(Icons.broken_image, color: Colors.grey),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.image_not_supported, color: Colors.grey, size: 24),
+                  const SizedBox(height: 4),
+                  Text(
+                    event.body ?? "Изображение",
+                    style: const TextStyle(color: Colors.grey, fontSize: 11),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
           );
         }
         final imageData = snapshot.data!.bytes;
+        // Сохраняем в кэш
+        _imageCache[eventId] = imageData;
+
         return ConstrainedBox(
           constraints: BoxConstraints(
             maxWidth: min(MediaQuery.of(context).size.width * 0.65, 300),
@@ -464,6 +505,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         );
       },
     );
+  }
+
+  /// Загрузка картинки: сначала пробуем миниатюру, если не вышло — полную
+  Future<MatrixFile> _loadImage(Event event) async {
+    try {
+      // Сначала пробуем миниатюру (быстрее)
+      final thumb = await event.downloadAndDecryptAttachment(getThumbnail: true);
+      if (thumb.bytes.isNotEmpty) return thumb;
+    } catch (_) {
+      // Миниатюра не доступна — пробуем полную картинку
+    }
+
+    // Полная картинка
+    return await event.downloadAndDecryptAttachment();
   }
 
   /// Карточка файла (иконка + название + размер)
