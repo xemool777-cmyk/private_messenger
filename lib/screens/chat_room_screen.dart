@@ -22,27 +22,40 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Timeline? _timeline;
   bool _isLoading = true;
   bool _isSending = false;
-  StreamSubscription? _updateSub;
+  StreamSubscription? _roomUpdateSub;
+  StreamSubscription? _syncSub;
 
-  // Кэш загруженных картинок, чтобы не перезагружать при скролле
+  // Кэш загруженных картинок
   final Map<String, Uint8List> _imageCache = {};
+  // Кэш Future чтобы не дублировать загрузки
+  final Map<String, Future<MatrixFile?>> _imageLoadFutures = {};
 
   @override
   void initState() {
     super.initState();
     _loadTimeline();
-    _updateSub = widget.room.onUpdate.stream.listen((_) => _onRoomUpdate());
+
+    // Слушаем обновления комнаты
+    _roomUpdateSub = widget.room.onUpdate.stream.listen((_) => _loadTimeline());
+
+    // Также слушаем глобальную синхронизацию — для надёжного обновления
+    _syncSub = widget.matrixService.client.onSync.stream.listen((syncUpdate) {
+      // Проверяем есть ли обновления в нашей комнате
+      if (mounted) {
+        final roomUpdate = syncUpdate.rooms?.join?.containsKey(widget.room.id) ?? false;
+        if (roomUpdate) {
+          _loadTimeline();
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
-    _updateSub?.cancel();
+    _roomUpdateSub?.cancel();
+    _syncSub?.cancel();
     _scrollController.dispose();
     super.dispose();
-  }
-
-  void _onRoomUpdate() {
-    _loadTimeline();
   }
 
   Future<void> _loadTimeline() async {
@@ -115,11 +128,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       setState(() { _isSending = true; });
 
       final bytes = await image.readAsBytes();
-      final fileName = image.name;
-
       final matrixFile = MatrixImageFile(
         bytes: bytes,
-        name: fileName,
+        name: image.name,
         mimeType: image.mimeType,
       );
 
@@ -186,7 +197,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
-  /// Определение MIME-типа по расширению файла
   String? _getMimeType(String name, String? extension) {
     final ext = (extension ?? name.split('.').last).toLowerCase();
     const mimeMap = {
@@ -195,15 +205,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'xls': 'application/vnd.ms-excel',
       'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'ppt': 'application/vnd.ms-powerpoint',
-      'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       'txt': 'text/plain',
       'zip': 'application/zip',
-      'rar': 'application/x-rar-compressed',
       'mp3': 'audio/mpeg',
-      'wav': 'audio/wav',
       'mp4': 'video/mp4',
-      'avi': 'video/x-msvideo',
     };
     return mimeMap[ext];
   }
@@ -271,10 +276,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                         } catch (e) {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text("Ошибка: $e"),
-                                backgroundColor: Colors.red,
-                              ),
+                              SnackBar(content: Text("Ошибка: $e"), backgroundColor: Colors.red),
                             );
                           }
                         } finally {
@@ -347,14 +349,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     return "${date.day}.${date.month.toString().padLeft(2, '0')}.${date.year}";
   }
 
-  /// Форматирование размера файла
   String _formatFileSize(int bytes) {
     if (bytes < 1024) return "$bytes Б";
     if (bytes < 1024 * 1024) return "${(bytes / 1024).toStringAsFixed(1)} КБ";
     return "${(bytes / (1024 * 1024)).toStringAsFixed(1)} МБ";
   }
 
-  /// Иконка для типа файла
   IconData _fileIcon(String? mimeType) {
     if (mimeType == null) return Icons.insert_drive_file;
     if (mimeType.startsWith('application/pdf')) return Icons.picture_as_pdf;
@@ -362,14 +362,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (mimeType.startsWith('video/')) return Icons.video_file;
     if (mimeType.startsWith('text/')) return Icons.description;
     if (mimeType.contains('zip') || mimeType.contains('rar')) return Icons.folder_zip;
-    if (mimeType.contains('word') || mimeType.contains('document')) return Icons.description;
-    if (mimeType.contains('sheet') || mimeType.contains('excel')) return Icons.table_chart;
     return Icons.insert_drive_file;
   }
 
   // ===================== ВИДЖЕТ СООБЩЕНИЯ =====================
 
-  /// Построение содержимого пузырька сообщения (текст / картинка / файл)
   Widget _buildMessageContent(Event event, bool isMe) {
     final msgType = event.messageType;
 
@@ -378,13 +375,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Сама картинка
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: _buildImageWidget(event),
           ),
-          // Подпись если есть
-          if (event.body != null && event.body!.isNotEmpty && event.body != event.attachmentMxcUrl.toString())
+          if (event.body != null && event.body!.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
@@ -424,11 +419,44 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
-  /// Виджет картинки с кэшем и фоллбэком
+  // ===================== ОТОБРАЖЕНИЕ КАРТИНОК =====================
+
+  /// Получить URL для скачивания медиа из mxc:// URI
+  String? _getMediaUrl(Event event) {
+    final mxcUrl = event.attachmentMxcUrl;
+    if (mxcUrl == null) return null;
+
+    // mxc://server/medium → https://server/_matrix/media/v3/download/server/medium
+    final serverName = mxcUrl.host;
+    final mediaId = mxcUrl.pathSegments.join('/');
+    if (serverName.isEmpty || mediaId.isEmpty) return null;
+
+    final homeserver = widget.matrixService.client.homeserver;
+    if (homeserver == null) return null;
+
+    return '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/download/$serverName/$mediaId';
+  }
+
+  /// Получить URL миниатюры
+  String? _getThumbnailUrl(Event event, {int width = 400, int height = 400}) {
+    final mxcUrl = event.attachmentMxcUrl;
+    if (mxcUrl == null) return null;
+
+    final serverName = mxcUrl.host;
+    final mediaId = mxcUrl.pathSegments.join('/');
+    if (serverName.isEmpty || mediaId.isEmpty) return null;
+
+    final homeserver = widget.matrixService.client.homeserver;
+    if (homeserver == null) return null;
+
+    return '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/thumbnail/$serverName/$mediaId?width=$width&height=$height&method=scale';
+  }
+
+  /// Виджет картинки — через URL + авторизацию
   Widget _buildImageWidget(Event event) {
     final eventId = event.eventId;
 
-    // Проверяем кэш
+    // Проверяем кэш байтов
     if (_imageCache.containsKey(eventId)) {
       return ConstrainedBox(
         constraints: BoxConstraints(
@@ -438,90 +466,153 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         child: Image.memory(
           _imageCache[eventId]!,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
-            width: 200,
-            height: 150,
-            color: Colors.grey[200],
-            child: const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
-          ),
+          errorBuilder: (_, __, ___) => _imageErrorWidget(event),
         ),
       );
     }
 
-    return FutureBuilder<MatrixFile>(
-      future: _loadImage(event),
+    // Пробуем URL-подход (быстрее и надёжнее)
+    final thumbnailUrl = _getThumbnailUrl(event);
+    final fullUrl = _getMediaUrl(event);
+    final accessToken = widget.matrixService.client.accessToken;
+
+    if (thumbnailUrl != null && accessToken != null) {
+      final headers = {'Authorization': 'Bearer $accessToken'};
+
+      return ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: min(MediaQuery.of(context).size.width * 0.65, 300),
+          maxHeight: 300,
+        ),
+        child: Image.network(
+          thumbnailUrl,
+          headers: headers,
+          fit: BoxFit.cover,
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) return child;
+            return Container(
+              width: 200,
+              height: 150,
+              color: Colors.grey[200],
+              child: Center(
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  value: loadingProgress.expectedTotalBytes != null
+                      ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                      : null,
+                ),
+              ),
+            );
+          },
+          errorBuilder: (context, thumbError, ___) {
+            // Миниатюра не загрузилась — пробуем полную картинку
+            if (fullUrl != null) {
+              return Image.network(
+                fullUrl,
+                headers: headers,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Container(
+                    width: 200,
+                    height: 150,
+                    color: Colors.grey[200],
+                    child: const Center(
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  );
+                },
+                errorBuilder: (context, fullError, ___) {
+                  // Полная тоже не загрузилась — пробуем через SDK
+                  return _buildImageFromSdk(event, eventId);
+                },
+              );
+            }
+            return _buildImageFromSdk(event, eventId);
+          },
+        ),
+      );
+    }
+
+    // Нет URL — пробуем через SDK
+    return _buildImageFromSdk(event, eventId);
+  }
+
+  /// Фоллбэк: загрузка картинки через SDK (downloadAndDecryptAttachment)
+  Widget _buildImageFromSdk(Event event, String eventId) {
+    // Используем кэш Future чтобы не запускать несколько загрузок
+    _imageLoadFutures.putIfAbsent(
+      eventId,
+      () => _loadImageBytes(event),
+    );
+
+    return FutureBuilder<MatrixFile?>(
+      future: _imageLoadFutures[eventId],
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Container(
             width: 200,
             height: 150,
             color: Colors.grey[200],
-            child: const Center(
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
+            child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
           );
         }
-        if (snapshot.hasError || !snapshot.hasData) {
-          // Фоллбэк: показать как файл если не удалось загрузить как картинку
-          return Container(
-            width: 200,
-            height: 80,
-            color: Colors.grey[200],
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.image_not_supported, color: Colors.grey, size: 24),
-                  const SizedBox(height: 4),
-                  Text(
-                    event.body ?? "Изображение",
-                    style: const TextStyle(color: Colors.grey, fontSize: 11),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+        if (snapshot.hasData && snapshot.data != null) {
+          final imageData = snapshot.data!.bytes;
+          if (imageData.isNotEmpty) {
+            _imageCache[eventId] = imageData;
+            return ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: min(MediaQuery.of(context).size.width * 0.65, 300),
+                maxHeight: 300,
               ),
-            ),
-          );
+              child: Image.memory(
+                imageData,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _imageErrorWidget(event),
+              ),
+            );
+          }
         }
-        final imageData = snapshot.data!.bytes;
-        // Сохраняем в кэш
-        _imageCache[eventId] = imageData;
-
-        return ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: min(MediaQuery.of(context).size.width * 0.65, 300),
-            maxHeight: 300,
-          ),
-          child: Image.memory(
-            imageData,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(
-              width: 200,
-              height: 150,
-              color: Colors.grey[200],
-              child: const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
-            ),
-          ),
-        );
+        return _imageErrorWidget(event);
       },
     );
   }
 
-  /// Загрузка картинки: сначала пробуем миниатюру, если не вышло — полную
-  Future<MatrixFile> _loadImage(Event event) async {
+  /// Загрузка байтов картинки через SDK
+  Future<MatrixFile?> _loadImageBytes(Event event) async {
     try {
-      // Сначала пробуем миниатюру (быстрее)
-      final thumb = await event.downloadAndDecryptAttachment(getThumbnail: true);
-      if (thumb.bytes.isNotEmpty) return thumb;
-    } catch (_) {
-      // Миниатюра не доступна — пробуем полную картинку
+      return await event.downloadAndDecryptAttachment();
+    } catch (e) {
+      debugPrint("Image download error: $e");
+      return null;
     }
-
-    // Полная картинка
-    return await event.downloadAndDecryptAttachment();
   }
 
-  /// Карточка файла (иконка + название + размер)
+  /// Виджет ошибки загрузки картинки
+  Widget _imageErrorWidget(Event event) {
+    return Container(
+      width: 200,
+      height: 80,
+      padding: const EdgeInsets.all(8),
+      color: Colors.grey[200],
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.image_not_supported, color: Colors.grey, size: 20),
+          const SizedBox(height: 2),
+          Text(
+            event.body ?? "Изображение",
+            style: const TextStyle(color: Colors.grey, fontSize: 11),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===================== КАРТОЧКА ФАЙЛА =====================
+
   Widget _buildFileCard(Event event, bool isMe, IconData icon, Color iconColor) {
     final fileInfo = event.content['info'] as Map<String, dynamic>?;
     final fileSize = fileInfo?['size'] as int?;
@@ -575,7 +666,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   const SnackBar(content: Text("Скачивание...")),
                 );
                 final file = await event.downloadAndDecryptAttachment();
-                // TODO: сохранить файл через path_provider + share
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text("Скачано: ${file.name} (${_formatFileSize(file.bytes.length)})")),
@@ -634,14 +724,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           final event = _timeline!.events[index];
                           final isMe = event.senderId == client.userID;
 
-                          // Показываем только сообщения
                           if (event.type != EventTypes.Message) return const SizedBox.shrink();
 
-                          // Разделитель дат
                           final showDateHeader = index == _timeline!.events.length - 1 ||
                               _timeline!.events[index + 1].originServerTs.day != event.originServerTs.day;
 
-                          // Является ли сообщение медиа
                           final isMedia = event.messageType == MessageTypes.Image ||
                               event.messageType == MessageTypes.Video;
 
@@ -749,12 +836,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ),
             child: Row(
               children: [
-                // Кнопка вложения
                 IconButton(
                   icon: const Icon(Icons.attach_file, color: Colors.indigo),
                   onPressed: _isSending ? null : _showAttachmentMenu,
                 ),
-                // Текстовое поле
                 Expanded(
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -775,7 +860,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // Кнопка отправки
                 CircleAvatar(
                   backgroundColor: Colors.indigo,
                   child: _isSending
