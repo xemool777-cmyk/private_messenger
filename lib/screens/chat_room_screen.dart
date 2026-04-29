@@ -48,7 +48,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _loadTimeline();
   }
 
-  void _loadTimeline() async {
+  Future<void> _loadTimeline() async {
     if (!mounted) return;
     try {
       // Убеждаемся что комната загружена
@@ -131,16 +131,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.room.displayname),
-            Text(
-              "${widget.room.getJoinedMembers().length} участников",
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
-            ),
-          ],
-        ),
+        title: Text(widget.room.displayname),
       ),
       body: Column(
         children: [
