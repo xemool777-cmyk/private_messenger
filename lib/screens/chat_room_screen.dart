@@ -411,9 +411,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: _buildImageWidget(event),
+          GestureDetector(
+            onTap: () => _openFullScreenImage(event),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: _buildImageWidget(event),
+            ),
           ),
           if (event.body != null && event.body!.isNotEmpty)
             Padding(
@@ -726,6 +729,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
+  // ===================== ПОЛНОЭКРАННЫЙ ПРОСМОТР КАРТИНКИ =====================
+
+  void _openFullScreenImage(Event event) {
+    final eventId = event.eventId;
+    final cachedBytes = _imageCache[eventId];
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _FullScreenImageView(
+          event: event,
+          cachedBytes: cachedBytes,
+          matrixService: widget.matrixService,
+        ),
+      ),
+    );
+  }
+
   // ===================== КАРТОЧКА ФАЙЛА =====================
 
   Widget _buildFileCard(Event event, bool isMe, IconData icon, Color iconColor) {
@@ -1017,6 +1038,129 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ===================== ПОЛНОЭКРАННЫЙ ПРОСМОТР КАРТИНКИ =====================
+
+class _FullScreenImageView extends StatefulWidget {
+  final Event event;
+  final Uint8List? cachedBytes;
+  final MatrixService matrixService;
+
+  const _FullScreenImageView({
+    required this.event,
+    this.cachedBytes,
+    required this.matrixService,
+  });
+
+  @override
+  State<_FullScreenImageView> createState() => _FullScreenImageViewState();
+}
+
+class _FullScreenImageViewState extends State<_FullScreenImageView> {
+  final TransformationController _transformController = TransformationController();
+
+  @override
+  void dispose() {
+    _transformController.dispose();
+    super.dispose();
+  }
+
+  /// Скачивание через MSC3916 (как в чате)
+  Future<Uint8List?> _downloadImage() async {
+    // Если есть кэш — используем
+    if (widget.cachedBytes != null) return widget.cachedBytes!;
+
+    final mxcUrl = widget.event.attachmentMxcUrl;
+    final homeserver = widget.matrixService.client.homeserver;
+    final accessToken = widget.matrixService.client.accessToken;
+    if (mxcUrl == null || homeserver == null || accessToken == null) return null;
+
+    final serverName = mxcUrl.host;
+    final mediaId = mxcUrl.pathSegments.join('/');
+
+    // MSC3916 endpoint
+    final url = '${homeserver.scheme}://${homeserver.host}/_matrix/client/v1/media/download/$serverName/$mediaId';
+
+    try {
+      final httpClient = HttpClient();
+      try {
+        httpClient.badCertificateCallback = (cert, host, port) => true;
+        final request = await httpClient.getUrl(Uri.parse(url));
+        request.headers.set('Authorization', 'Bearer $accessToken');
+        final response = await request.close();
+
+        if (response.statusCode == 200) {
+          final builder = await response.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d));
+          return builder.toBytes();
+        }
+      } finally {
+        httpClient.close();
+      }
+    } catch (_) {}
+
+    // Фоллбэк: SDK
+    try {
+      final file = await widget.event.downloadAndDecryptAttachment();
+      return file.bytes;
+    } catch (_) {}
+
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text(
+          widget.event.body ?? "Изображение",
+          style: const TextStyle(fontSize: 14),
+        ),
+      ),
+      body: Center(
+        child: FutureBuilder<Uint8List?>(
+          future: _downloadImage(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const CircularProgressIndicator(color: Colors.white);
+            }
+
+            if (snapshot.hasData && snapshot.data != null && snapshot.data!.isNotEmpty) {
+              return InteractiveViewer(
+                transformationController: _transformController,
+                minScale: 0.5,
+                maxScale: 4.0,
+                child: Image.memory(
+                  snapshot.data!,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.broken_image, color: Colors.white54, size: 64),
+                      SizedBox(height: 12),
+                      Text("Не удалось отобразить", style: TextStyle(color: Colors.white54)),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            return const Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline, color: Colors.white54, size: 64),
+                SizedBox(height: 12),
+                Text("Не удалось загрузить", style: TextStyle(color: Colors.white54)),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
