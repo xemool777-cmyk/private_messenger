@@ -457,140 +457,218 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   // ===================== ОТОБРАЖЕНИЕ КАРТИНОК =====================
 
-  /// Загрузка картинки — ТОЛЬКО через SDK (downloadAndDecryptAttachment)
-  /// Image.network не работает на Android с сертификатами Conduit
+  /// Диагностика — первые байты в hex
+  String _hexDump(Uint8List bytes, [int maxLen = 16]) {
+    final sb = StringBuffer();
+    for (int i = 0; i < bytes.length && i < maxLen; i++) {
+      sb.write('${bytes[i].toRadixString(16).padLeft(2, '0')} ');
+    }
+    return sb.toString().trim();
+  }
+
+  /// Проверка — похожи ли байты на картинку
+  bool _looksLikeImage(Uint8List bytes) {
+    if (bytes.length < 4) return false;
+    // JPEG: FF D8 FF
+    if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return true;
+    // PNG: 89 50 4E 47
+    if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return true;
+    // GIF: 47 49 46
+    if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) return true;
+    // WebP: 52 49 46 46 ... 57 45 42 50
+    if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46) return true;
+    // BMP: 42 4D
+    if (bytes[0] == 0x42 && bytes[1] == 0x4D) return true;
+    return false;
+  }
+
+  /// Проверка — зашифровано ли медиа в событии
+  bool _isEncryptedMedia(Event event) {
+    final content = event.content;
+    return content.containsKey('file');
+  }
+
+  /// Загрузка картинки
   Widget _buildImageWidget(Event event) {
     final eventId = event.eventId;
     final mxcUrl = event.attachmentMxcUrl;
 
-    // Нет mxc URL — сразу ошибка
     if (mxcUrl == null) {
       debugPrint("[IMAGE] No mxc URL for event $eventId");
       return _imageErrorWidget(event, "Нет URL");
     }
 
-    // Проверяем кэш байтов
+    // Проверяем кэш
     if (_imageCache.containsKey(eventId)) {
       return _imageFromBytes(_imageCache[eventId]!, event);
     }
 
-    // Запускаем загрузку через SDK (только один раз на событие)
-    _imageLoadFutures.putIfAbsent(eventId, () => _loadImageBytes(event));
+    // Запускаем цепочку загрузки (только один раз на событие)
+    _imageLoadFutures.putIfAbsent(eventId, () => _loadImageAllMethods(event));
 
-    return FutureBuilder<MatrixFile?>(
-      future: _imageLoadFutures[eventId],
+    return FutureBuilder<Uint8List?>(
+      future: _imageLoadFutures[eventId]!.then((file) => file?.bytes),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return _imageLoadingWidget();
         }
 
-        if (snapshot.hasData && snapshot.data != null) {
-          final imageData = snapshot.data!.bytes;
-          if (imageData.isNotEmpty) {
-            // Сохраняем в кэш
-            _imageCache[eventId] = imageData;
-            return _imageFromBytes(imageData, event);
+        if (snapshot.hasData && snapshot.data != null && snapshot.data!.isNotEmpty) {
+          final bytes = snapshot.data!;
+          debugPrint("[IMAGE] Got ${bytes.length} bytes, hex: ${_hexDump(bytes)}");
+
+          if (_looksLikeImage(bytes)) {
+            _imageCache[eventId] = bytes;
+            return _imageFromBytes(bytes, event);
+          } else {
+            debugPrint("[IMAGE] Bytes don't look like an image! First hex: ${_hexDump(bytes)}");
+            // Если байты не похожи на картинку — показываем диагностику
+            return _imageErrorWidget(event, "Не картинка (${bytes.length} байт)");
           }
-          debugPrint("[IMAGE] Empty bytes for event $eventId");
         }
 
-        if (snapshot.hasError) {
-          debugPrint("[IMAGE] FutureBuilder error for $eventId: ${snapshot.error}");
-        }
-
-        // Основной метод не сработал — пробуем прямой HTTP запрос
-        return _buildImageFallbackHttp(event, eventId, mxcUrl);
+        debugPrint("[IMAGE] All methods failed for $eventId");
+        return _imageErrorWidget(event, "Не удалось загрузить");
       },
     );
   }
 
-  /// Основной метод загрузки — через SDK
-  Future<MatrixFile?> _loadImageBytes(Event event) async {
+  /// Попробовать ВСЕ методы загрузки по очереди
+  Future<MatrixFile?> _loadImageAllMethods(Event event) async {
+    final isEncrypted = _isEncryptedMedia(event);
+    debugPrint("[IMAGE] Event ${event.eventId}, encrypted=$isEncrypted, mxc=${event.attachmentMxcUrl}");
+
+    // Метод 1: SDK downloadAndDecryptAttachment — работает и для зашифрованных
     try {
-      debugPrint("[IMAGE] Downloading via SDK: ${event.attachmentMxcUrl}");
+      debugPrint("[IMAGE] Method 1: SDK downloadAndDecryptAttachment");
       final file = await event.downloadAndDecryptAttachment();
-      debugPrint("[IMAGE] SDK download OK: ${file.bytes.length} bytes, name: ${file.name}");
-      return file;
+      debugPrint("[IMAGE] Method 1 OK: ${file.bytes.length} bytes, hex: ${_hexDump(file.bytes)}");
+
+      if (_looksLikeImage(file.bytes)) {
+        debugPrint("[IMAGE] Method 1: bytes look like image ✓");
+        return file;
+      } else {
+        debugPrint("[IMAGE] Method 1: bytes NOT a valid image, trying next method");
+      }
     } catch (e) {
-      debugPrint("[IMAGE] SDK download failed: $e");
-      return null;
+      debugPrint("[IMAGE] Method 1 FAILED: $e");
     }
+
+    // Метод 2: HTTP через access_token в URL параметре
+    // (Conduit может не принимать Authorization header при редиректе)
+    try {
+      debugPrint("[IMAGE] Method 2: HTTP with token in URL");
+      final bytes = await _httpDownloadWithTokenInUrl(event);
+      if (bytes != null && _looksLikeImage(bytes)) {
+        debugPrint("[IMAGE] Method 2 OK: ${bytes.length} bytes ✓");
+        return MatrixFile(bytes: bytes, name: event.body ?? 'image');
+      } else if (bytes != null) {
+        debugPrint("[IMAGE] Method 2: got ${bytes.length} bytes but NOT image, hex: ${_hexDump(bytes)}");
+      }
+    } catch (e) {
+      debugPrint("[IMAGE] Method 2 FAILED: $e");
+    }
+
+    // Метод 3: HTTP с Authorization header + badCertificate
+    try {
+      debugPrint("[IMAGE] Method 3: HTTP with auth header");
+      final bytes = await _httpDownloadWithAuthHeader(event);
+      if (bytes != null && _looksLikeImage(bytes)) {
+        debugPrint("[IMAGE] Method 3 OK: ${bytes.length} bytes ✓");
+        return MatrixFile(bytes: bytes, name: event.body ?? 'image');
+      } else if (bytes != null) {
+        debugPrint("[IMAGE] Method 3: got ${bytes.length} bytes but NOT image, hex: ${_hexDump(bytes)}");
+      }
+    } catch (e) {
+      debugPrint("[IMAGE] Method 3 FAILED: $e");
+    }
+
+    debugPrint("[IMAGE] ALL METHODS FAILED for ${event.eventId}");
+    return null;
   }
 
-  /// Фоллбэк — прямой HTTP запрос с авторизацией
-  Widget _buildImageFallbackHttp(Event event, String eventId, Uri mxcUrl) {
+  /// HTTP скачивание — access_token в URL параметре
+  Future<Uint8List?> _httpDownloadWithTokenInUrl(Event event) async {
+    final mxcUrl = event.attachmentMxcUrl;
     final homeserver = widget.matrixService.client.homeserver;
     final accessToken = widget.matrixService.client.accessToken;
-
-    if (homeserver == null || accessToken == null) {
-      return _imageErrorWidget(event, "Нет подключения");
-    }
+    if (mxcUrl == null || homeserver == null || accessToken == null) return null;
 
     final serverName = mxcUrl.host;
     final mediaId = mxcUrl.pathSegments.join('/');
 
-    // Пробуем v3, потом v1
-    final downloadUrls = [
+    // Пробуем v3 и v1 с токеном в URL
+    final urls = [
+      '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/download/$serverName/$mediaId?access_token=$accessToken',
+      '${homeserver.scheme}://${homeserver.host}/_matrix/media/v1/download/$serverName/$mediaId?access_token=$accessToken',
+    ];
+
+    for (final url in urls) {
+      try {
+        debugPrint("[IMAGE] HTTP token-in-URL: $url");
+        final httpClient = HttpClient();
+        try {
+          httpClient.badCertificateCallback = (cert, host, port) => true;
+          final request = await httpClient.getUrl(Uri.parse(url));
+          final response = await request.close();
+
+          if (response.statusCode == 200) {
+            final builder = await response.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d));
+            debugPrint("[IMAGE] HTTP token-in-URL OK: ${builder.length} bytes");
+            return builder.toBytes();
+          } else {
+            debugPrint("[IMAGE] HTTP token-in-URL status ${response.statusCode}");
+          }
+        } finally {
+          httpClient.close();
+        }
+      } catch (e) {
+        debugPrint("[IMAGE] HTTP token-in-URL error: $e");
+      }
+    }
+    return null;
+  }
+
+  /// HTTP скачивание — Authorization header
+  Future<Uint8List?> _httpDownloadWithAuthHeader(Event event) async {
+    final mxcUrl = event.attachmentMxcUrl;
+    final homeserver = widget.matrixService.client.homeserver;
+    final accessToken = widget.matrixService.client.accessToken;
+    if (mxcUrl == null || homeserver == null || accessToken == null) return null;
+
+    final serverName = mxcUrl.host;
+    final mediaId = mxcUrl.pathSegments.join('/');
+
+    final urls = [
       '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/download/$serverName/$mediaId',
       '${homeserver.scheme}://${homeserver.host}/_matrix/media/v1/download/$serverName/$mediaId',
     ];
 
-    return _tryHttpDownload(event, eventId, downloadUrls, accessToken, 0);
-  }
-
-  /// Попытка HTTP скачивания по списку URL
-  Widget _tryHttpDownload(Event event, String eventId, List<String> urls, String accessToken, int urlIndex) {
-    if (urlIndex >= urls.length) {
-      return _imageErrorWidget(event, "Не удалось загрузить");
-    }
-
-    return FutureBuilder<Uint8List?>(
-      future: _httpDownloadImage(urls[urlIndex], accessToken, eventId),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return _imageLoadingWidget();
-        }
-        if (snapshot.hasData && snapshot.data != null && snapshot.data!.isNotEmpty) {
-          _imageCache[eventId] = snapshot.data!;
-          return _imageFromBytes(snapshot.data!, event);
-        }
-        // Пробуем следующий URL
-        return _tryHttpDownload(event, eventId, urls, accessToken, urlIndex + 1);
-      },
-    );
-  }
-
-  /// Прямой HTTP запрос для скачивания медиа
-  Future<Uint8List?> _httpDownloadImage(String url, String accessToken, String eventId) async {
-    try {
-      debugPrint("[IMAGE] HTTP download attempt: $url");
-      final httpClient = HttpClient();
+    for (final url in urls) {
       try {
-        // Принимаем любой сертификат (для самоподписанных)
-        httpClient.badCertificateCallback = (cert, host, port) => true;
+        debugPrint("[IMAGE] HTTP auth-header: $url");
+        final httpClient = HttpClient();
+        try {
+          httpClient.badCertificateCallback = (cert, host, port) => true;
+          final request = await httpClient.getUrl(Uri.parse(url));
+          request.headers.set('Authorization', 'Bearer $accessToken');
+          final response = await request.close();
 
-        final request = await httpClient.getUrl(Uri.parse(url));
-        request.headers.set('Authorization', 'Bearer $accessToken');
-        final response = await request.close();
-
-        if (response.statusCode == 200) {
-          final bytes = await response.fold<BytesBuilder>(
-            BytesBuilder(),
-            (b, d) => b..add(d),
-          );
-          debugPrint("[IMAGE] HTTP download OK: ${bytes.length} bytes");
-          return bytes.toBytes();
-        } else {
-          debugPrint("[IMAGE] HTTP ${response.statusCode} for $url");
-          return null;
+          if (response.statusCode == 200) {
+            final builder = await response.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d));
+            debugPrint("[IMAGE] HTTP auth-header OK: ${builder.length} bytes");
+            return builder.toBytes();
+          } else {
+            debugPrint("[IMAGE] HTTP auth-header status ${response.statusCode}");
+          }
+        } finally {
+          httpClient.close();
         }
-      } finally {
-        httpClient.close();
+      } catch (e) {
+        debugPrint("[IMAGE] HTTP auth-header error: $e");
       }
-    } catch (e) {
-      debugPrint("[IMAGE] HTTP download error: $e");
-      return null;
     }
+    return null;
   }
 
   /// Виджет картинки из байтов
