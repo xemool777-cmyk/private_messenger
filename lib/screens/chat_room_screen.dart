@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -21,11 +22,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _scrollController = ScrollController();
   Timeline? _timeline;
   bool _isLoading = true;
+  bool _isLoadingHistory = false;
   bool _isSending = false;
   StreamSubscription? _roomUpdateSub;
-  StreamSubscription? _syncSub;
+  bool _canLoadMoreHistory = true;
 
-  // Кэш загруженных картинок
+  // Кэш загруженных картинок (eventId → байты)
   final Map<String, Uint8List> _imageCache = {};
   // Кэш Future чтобы не дублировать загрузки
   final Map<String, Future<MatrixFile?>> _imageLoadFutures = {};
@@ -33,48 +35,83 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
-    _loadTimeline();
+    _initTimeline();
 
-    // Слушаем обновления комнаты
-    _roomUpdateSub = widget.room.onUpdate.stream.listen((_) => _loadTimeline());
-
-    // Также слушаем глобальную синхронизацию — для надёжного обновления
-    _syncSub = widget.matrixService.client.onSync.stream.listen((syncUpdate) {
-      // Проверяем есть ли обновления в нашей комнате
-      if (mounted) {
-        final roomUpdate = syncUpdate.rooms?.join?.containsKey(widget.room.id) ?? false;
-        if (roomUpdate) {
-          _loadTimeline();
-        }
-      }
+    // Слушаем обновления комнаты — просто обновляем UI, НЕ пересоздаём таймлайн!
+    _roomUpdateSub = widget.room.onUpdate.stream.listen((_) {
+      if (mounted) setState(() {});
     });
   }
 
   @override
   void dispose() {
     _roomUpdateSub?.cancel();
-    _syncSub?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadTimeline() async {
+  // ===================== ТАЙМЛАЙН (создаётся ОДИН раз) =====================
+
+  Future<void> _initTimeline() async {
     if (!mounted) return;
     try {
       if (widget.room.getState(EventTypes.RoomCreate) == null) {
         await widget.room.postLoad();
       }
+
+      // Создаём таймлайн ОДИН раз
       final timeline = await widget.room.getTimeline();
+      _timeline = timeline;
+
+      // Загружаем старые сообщения с сервера
+      await _requestMoreHistory();
+
       if (mounted) {
-        setState(() {
-          _timeline = timeline;
-          _isLoading = false;
-        });
+        setState(() { _isLoading = false; });
         _scrollToBottom();
       }
+
+      // Слушаем прокрутку вверх для подгрузки истории
+      _scrollController.addListener(_onScroll);
     } catch (e) {
-      debugPrint("Timeline load error: $e");
+      debugPrint("Timeline init error: $e");
       if (mounted) setState(() { _isLoading = false; });
+    }
+  }
+
+  /// Подгрузка старых сообщений
+  Future<void> _requestMoreHistory() async {
+    if (_timeline == null || !_canLoadMoreHistory) return;
+    try {
+      final result = await _timeline!.requestHistory();
+      // Если вернулось 0 событий — история кончилась
+      if (result == 0) {
+        _canLoadMoreHistory = false;
+      }
+    } catch (e) {
+      debugPrint("History request error: $e");
+      // Если метод не поддерживается — не критично
+    }
+  }
+
+  /// При прокрутке вверх — подгрузить ещё историю
+  void _onScroll() {
+    if (_scrollController.hasClients &&
+        _scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 100 &&
+        !_isLoadingHistory &&
+        _canLoadMoreHistory &&
+        _timeline != null) {
+      _loadMoreHistory();
+    }
+  }
+
+  Future<void> _loadMoreHistory() async {
+    if (_isLoadingHistory || !_canLoadMoreHistory) return;
+    setState(() { _isLoadingHistory = true; });
+    try {
+      await _requestMoreHistory();
+    } finally {
+      if (mounted) setState(() { _isLoadingHistory = false; });
     }
   }
 
@@ -97,7 +134,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
     try {
       await widget.room.sendTextEvent(text);
-      await _loadTimeline();
+      // Таймлайн обновится автоматически через room.onUpdate
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -135,7 +172,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       );
 
       await widget.room.sendFileEvent(matrixFile);
-      await _loadTimeline();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -182,7 +218,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       );
 
       await widget.room.sendFileEvent(matrixFile);
-      await _loadTimeline();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -272,7 +307,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           );
 
                           await widget.room.sendFileEvent(matrixFile);
-                          await _loadTimeline();
                         } catch (e) {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -421,176 +455,174 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   // ===================== ОТОБРАЖЕНИЕ КАРТИНОК =====================
 
-  /// Получить URL для скачивания медиа из mxc:// URI
-  String? _getMediaUrl(Event event) {
-    final mxcUrl = event.attachmentMxcUrl;
-    if (mxcUrl == null) return null;
-
-    // mxc://server/medium → https://server/_matrix/media/v3/download/server/medium
-    final serverName = mxcUrl.host;
-    final mediaId = mxcUrl.pathSegments.join('/');
-    if (serverName.isEmpty || mediaId.isEmpty) return null;
-
-    final homeserver = widget.matrixService.client.homeserver;
-    if (homeserver == null) return null;
-
-    return '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/download/$serverName/$mediaId';
-  }
-
-  /// Получить URL миниатюры
-  String? _getThumbnailUrl(Event event, {int width = 400, int height = 400}) {
-    final mxcUrl = event.attachmentMxcUrl;
-    if (mxcUrl == null) return null;
-
-    final serverName = mxcUrl.host;
-    final mediaId = mxcUrl.pathSegments.join('/');
-    if (serverName.isEmpty || mediaId.isEmpty) return null;
-
-    final homeserver = widget.matrixService.client.homeserver;
-    if (homeserver == null) return null;
-
-    return '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/thumbnail/$serverName/$mediaId?width=$width&height=$height&method=scale';
-  }
-
-  /// Виджет картинки — через URL + авторизацию
+  /// Загрузка картинки — ТОЛЬКО через SDK (downloadAndDecryptAttachment)
+  /// Image.network не работает на Android с сертификатами Conduit
   Widget _buildImageWidget(Event event) {
     final eventId = event.eventId;
+    final mxcUrl = event.attachmentMxcUrl;
+
+    // Нет mxc URL — сразу ошибка
+    if (mxcUrl == null) {
+      debugPrint("[IMAGE] No mxc URL for event $eventId");
+      return _imageErrorWidget(event, "Нет URL");
+    }
 
     // Проверяем кэш байтов
     if (_imageCache.containsKey(eventId)) {
-      return ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: min(MediaQuery.of(context).size.width * 0.65, 300),
-          maxHeight: 300,
-        ),
-        child: Image.memory(
-          _imageCache[eventId]!,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _imageErrorWidget(event),
-        ),
-      );
+      return _imageFromBytes(_imageCache[eventId]!, event);
     }
 
-    // Пробуем URL-подход (быстрее и надёжнее)
-    final thumbnailUrl = _getThumbnailUrl(event);
-    final fullUrl = _getMediaUrl(event);
-    final accessToken = widget.matrixService.client.accessToken;
-
-    if (thumbnailUrl != null && accessToken != null) {
-      final headers = {'Authorization': 'Bearer $accessToken'};
-
-      return ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: min(MediaQuery.of(context).size.width * 0.65, 300),
-          maxHeight: 300,
-        ),
-        child: Image.network(
-          thumbnailUrl,
-          headers: headers,
-          fit: BoxFit.cover,
-          loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) return child;
-            return Container(
-              width: 200,
-              height: 150,
-              color: Colors.grey[200],
-              child: Center(
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  value: loadingProgress.expectedTotalBytes != null
-                      ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
-                      : null,
-                ),
-              ),
-            );
-          },
-          errorBuilder: (context, thumbError, ___) {
-            // Миниатюра не загрузилась — пробуем полную картинку
-            if (fullUrl != null) {
-              return Image.network(
-                fullUrl,
-                headers: headers,
-                fit: BoxFit.cover,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return Container(
-                    width: 200,
-                    height: 150,
-                    color: Colors.grey[200],
-                    child: const Center(
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  );
-                },
-                errorBuilder: (context, fullError, ___) {
-                  // Полная тоже не загрузилась — пробуем через SDK
-                  return _buildImageFromSdk(event, eventId);
-                },
-              );
-            }
-            return _buildImageFromSdk(event, eventId);
-          },
-        ),
-      );
-    }
-
-    // Нет URL — пробуем через SDK
-    return _buildImageFromSdk(event, eventId);
-  }
-
-  /// Фоллбэк: загрузка картинки через SDK (downloadAndDecryptAttachment)
-  Widget _buildImageFromSdk(Event event, String eventId) {
-    // Используем кэш Future чтобы не запускать несколько загрузок
-    _imageLoadFutures.putIfAbsent(
-      eventId,
-      () => _loadImageBytes(event),
-    );
+    // Запускаем загрузку через SDK (только один раз на событие)
+    _imageLoadFutures.putIfAbsent(eventId, () => _loadImageBytes(event));
 
     return FutureBuilder<MatrixFile?>(
       future: _imageLoadFutures[eventId],
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Container(
-            width: 200,
-            height: 150,
-            color: Colors.grey[200],
-            child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          );
+          return _imageLoadingWidget();
         }
+
         if (snapshot.hasData && snapshot.data != null) {
           final imageData = snapshot.data!.bytes;
           if (imageData.isNotEmpty) {
+            // Сохраняем в кэш
             _imageCache[eventId] = imageData;
-            return ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: min(MediaQuery.of(context).size.width * 0.65, 300),
-                maxHeight: 300,
-              ),
-              child: Image.memory(
-                imageData,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _imageErrorWidget(event),
-              ),
-            );
+            return _imageFromBytes(imageData, event);
           }
+          debugPrint("[IMAGE] Empty bytes for event $eventId");
         }
-        return _imageErrorWidget(event);
+
+        if (snapshot.hasError) {
+          debugPrint("[IMAGE] FutureBuilder error for $eventId: ${snapshot.error}");
+        }
+
+        // Основной метод не сработал — пробуем прямой HTTP запрос
+        return _buildImageFallbackHttp(event, eventId, mxcUrl);
       },
     );
   }
 
-  /// Загрузка байтов картинки через SDK
+  /// Основной метод загрузки — через SDK
   Future<MatrixFile?> _loadImageBytes(Event event) async {
     try {
-      return await event.downloadAndDecryptAttachment();
+      debugPrint("[IMAGE] Downloading via SDK: ${event.attachmentMxcUrl}");
+      final file = await event.downloadAndDecryptAttachment();
+      debugPrint("[IMAGE] SDK download OK: ${file.bytes.length} bytes, name: ${file.name}");
+      return file;
     } catch (e) {
-      debugPrint("Image download error: $e");
+      debugPrint("[IMAGE] SDK download failed: $e");
       return null;
     }
   }
 
+  /// Фоллбэк — прямой HTTP запрос с авторизацией
+  Widget _buildImageFallbackHttp(Event event, String eventId, Uri mxcUrl) {
+    final homeserver = widget.matrixService.client.homeserver;
+    final accessToken = widget.matrixService.client.accessToken;
+
+    if (homeserver == null || accessToken == null) {
+      return _imageErrorWidget(event, "Нет подключения");
+    }
+
+    final serverName = mxcUrl.host;
+    final mediaId = mxcUrl.pathSegments.join('/');
+
+    // Пробуем v3, потом v1
+    final downloadUrls = [
+      '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/download/$serverName/$mediaId',
+      '${homeserver.scheme}://${homeserver.host}/_matrix/media/v1/download/$serverName/$mediaId',
+    ];
+
+    return _tryHttpDownload(event, eventId, downloadUrls, accessToken, 0);
+  }
+
+  /// Попытка HTTP скачивания по списку URL
+  Widget _tryHttpDownload(Event event, String eventId, List<String> urls, String accessToken, int urlIndex) {
+    if (urlIndex >= urls.length) {
+      return _imageErrorWidget(event, "Не удалось загрузить");
+    }
+
+    return FutureBuilder<Uint8List?>(
+      future: _httpDownloadImage(urls[urlIndex], accessToken, eventId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _imageLoadingWidget();
+        }
+        if (snapshot.hasData && snapshot.data != null && snapshot.data!.isNotEmpty) {
+          _imageCache[eventId] = snapshot.data!;
+          return _imageFromBytes(snapshot.data!, event);
+        }
+        // Пробуем следующий URL
+        return _tryHttpDownload(event, eventId, urls, accessToken, urlIndex + 1);
+      },
+    );
+  }
+
+  /// Прямой HTTP запрос для скачивания медиа
+  Future<Uint8List?> _httpDownloadImage(String url, String accessToken, String eventId) async {
+    try {
+      debugPrint("[IMAGE] HTTP download attempt: $url");
+      final httpClient = HttpClient();
+      try {
+        // Принимаем любой сертификат (для самоподписанных)
+        httpClient.badCertificateCallback = (cert, host, port) => true;
+
+        final request = await httpClient.getUrl(Uri.parse(url));
+        request.headers.set('Authorization', 'Bearer $accessToken');
+        final response = await request.close();
+
+        if (response.statusCode == 200) {
+          final bytes = await response.fold<BytesBuilder>(
+            BytesBuilder(),
+            (b, d) => b..add(d),
+          );
+          debugPrint("[IMAGE] HTTP download OK: ${bytes.length} bytes");
+          return bytes.toBytes();
+        } else {
+          debugPrint("[IMAGE] HTTP ${response.statusCode} for $url");
+          return null;
+        }
+      } finally {
+        httpClient.close();
+      }
+    } catch (e) {
+      debugPrint("[IMAGE] HTTP download error: $e");
+      return null;
+    }
+  }
+
+  /// Виджет картинки из байтов
+  Widget _imageFromBytes(Uint8List bytes, Event event) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: min(MediaQuery.of(context).size.width * 0.65, 300),
+        maxHeight: 300,
+      ),
+      child: Image.memory(
+        bytes,
+        fit: BoxFit.cover,
+        errorBuilder: (_, error, ___) {
+          debugPrint("[IMAGE] Image.memory decode error: $error");
+          return _imageErrorWidget(event, "Ошибка декодирования");
+        },
+      ),
+    );
+  }
+
+  /// Виджет загрузки картинки
+  Widget _imageLoadingWidget() {
+    return Container(
+      width: 200,
+      height: 150,
+      color: Colors.grey[200],
+      child: const Center(
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+    );
+  }
+
   /// Виджет ошибки загрузки картинки
-  Widget _imageErrorWidget(Event event) {
+  Widget _imageErrorWidget(Event event, [String? reason]) {
     return Container(
       width: 200,
       height: 80,
@@ -602,7 +634,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           const Icon(Icons.image_not_supported, color: Colors.grey, size: 20),
           const SizedBox(height: 2),
           Text(
-            event.body ?? "Изображение",
+            reason ?? event.body ?? "Изображение",
             style: const TextStyle(color: Colors.grey, fontSize: 11),
             overflow: TextOverflow.ellipsis,
           ),
@@ -690,6 +722,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   Widget build(BuildContext context) {
     final client = widget.matrixService.client;
+    final events = _timeline?.events ?? [];
 
     return Scaffold(
       appBar: AppBar(
@@ -701,7 +734,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : _timeline == null || _timeline!.events.isEmpty
+                : events.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -719,15 +752,29 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                         controller: _scrollController,
                         padding: const EdgeInsets.all(10),
                         reverse: true,
-                        itemCount: _timeline!.events.length,
+                        itemCount: events.length + (_canLoadMoreHistory ? 1 : 0),
                         itemBuilder: (context, index) {
-                          final event = _timeline!.events[index];
+                          // Индикатор подгрузки истории вверху
+                          if (index == events.length) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Center(
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              ),
+                            );
+                          }
+
+                          final event = events[index];
                           final isMe = event.senderId == client.userID;
 
                           if (event.type != EventTypes.Message) return const SizedBox.shrink();
 
-                          final showDateHeader = index == _timeline!.events.length - 1 ||
-                              _timeline!.events[index + 1].originServerTs.day != event.originServerTs.day;
+                          final showDateHeader = index == events.length - 1 ||
+                              events[index + 1].originServerTs.day != event.originServerTs.day;
 
                           final isMedia = event.messageType == MessageTypes.Image ||
                               event.messageType == MessageTypes.Video;
