@@ -20,8 +20,9 @@ dependencies:
   # Если Bridgefy не подключится, можно будет закомментировать эту строку
   # bridgefy: ^1.0.0 
 
-  # Хранилище данных
-  #hive_flutter: ^1.1.0
+  # Хранилище данных (hive уже транзитивная зависимость matrix,
+  # но hive_flutter нужен для Hive.initFlutter() если потребуется)
+  # hive_flutter: ^1.1.0
   
   # Утилиты
   path_provider: ^2.1.1
