@@ -1,0 +1,38 @@
+name: private_messenger
+description: A private messenger with offline mesh support.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Matrix SDK (ядро мессенджера)
+  matrix: ^0.22.0
+
+  # WebRTC для видеозвонков
+  flutter_webrtc: ^0.9.48
+
+  # Bridgefy для офлайн mesh (требует ключ API)
+  # Если Bridgefy не подключится, можно будет закомментировать эту строку
+  # bridgefy: ^1.0.0 
+
+  # Хранилище данных
+  #hive_flutter: ^1.1.0
+  
+  # Утилиты
+  path_provider: ^2.1.1
+  connectivity_plus: ^5.0.2
+  permission_handler: ^11.0.1
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
