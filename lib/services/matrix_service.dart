@@ -56,9 +56,10 @@ class MatrixService {
         final timelineEvents = roomData.timeline?.events;
         if (timelineEvents == null || timelineEvents.isEmpty) continue;
 
-        for (final eventMap in timelineEvents) {
-          final eventType = eventMap['type'] as String?;
-          final senderId = eventMap['sender'] as String?;
+        for (final matrixEvent in timelineEvents) {
+          // MatrixEvent имеет свойства type, senderId, content
+          final eventType = matrixEvent.type;
+          final senderId = matrixEvent.senderId;
 
           // Пропускаем свои же сообщения
           if (senderId == _client.userID) continue;
@@ -69,14 +70,14 @@ class MatrixService {
           // Не показываем уведомление если мы сейчас в этом чате
           if (_currentRoomId == roomId) continue;
 
-          // Получаем комнату и информацию
+          // Получаем комнату
           final room = _client.getRoomById(roomId);
           if (room == null) continue;
 
-          // Извлекаем текст сообщения
-          final content = eventMap['content'] as Map<String, dynamic>?;
-          final msgtype = content?['msgtype'] as String? ?? '';
-          final body = content?['body'] as String? ?? '';
+          // Извлекаем текст сообщения из content
+          final content = matrixEvent.content;
+          final msgtype = content['msgtype'] as String? ?? '';
+          final body = content['body'] as String? ?? '';
 
           String messageText;
           if (msgtype == 'm.image') {
@@ -91,9 +92,18 @@ class MatrixService {
             messageText = body.isNotEmpty ? body : 'Новое сообщение';
           }
 
-          // Имя отправителя
-          final sender = _client.getRoomById(roomId)?.getUser(senderId);
-          final senderName = sender?.displayName ?? senderId?.localpart ?? 'Неизвестный';
+          // Имя отправителя — из участников комнаты
+          String senderName = senderId?.localpart ?? 'Неизвестный';
+          try {
+            // Пробуем получить displayname из состояния комнаты
+            final memberEvent = room.getState('m.room.member', senderId);
+            if (memberEvent != null) {
+              final displayName = memberEvent.content['displayname'] as String?;
+              if (displayName != null && displayName.isNotEmpty) {
+                senderName = displayName;
+              }
+            }
+          } catch (_) {}
 
           debugPrint('[NOTIFY] New message in $roomId from $senderName: $messageText');
 

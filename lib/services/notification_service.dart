@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -77,14 +78,13 @@ class NotificationService {
   }) async {
     if (!_initialized) await init();
 
-    const androidDetails = AndroidNotificationDetails(
+    final androidDetails = AndroidNotificationDetails(
       'messages',
       'Сообщения',
       channelDescription: 'Уведомления о новых сообщениях',
       importance: Importance.high,
       priority: Priority.high,
       showWhen: true,
-      // Группируем уведомления по комнате
       groupKey: 'room_$roomId',
     );
 
@@ -94,7 +94,7 @@ class NotificationService {
       presentSound: true,
     );
 
-    const details = NotificationDetails(
+    final details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
     );
