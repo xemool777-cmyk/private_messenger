@@ -43,6 +43,12 @@ class MatrixService {
     await _client.init();
     _cachedUserId = _client.userID;
     debugPrint('[Matrix] After init: userID = $_cachedUserId');
+    debugPrint('[Matrix] Encryption enabled: ${_client.encryptionEnabled}');
+    debugPrint('[Matrix] Encryption object: ${_client.encryption != null ? "present" : "NULL"}');
+    if (_client.encryptionEnabled) {
+      debugPrint('[Matrix] Identity key: ${_client.identityKey}');
+      debugPrint('[Matrix] Fingerprint key: ${_client.fingerprintKey}');
+    }
 
     // Если уже залогинен — подключаемся к homeserver чтобы API работал
     if (_client.isLogged()) {

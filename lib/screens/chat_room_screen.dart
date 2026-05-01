@@ -857,6 +857,25 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       ),
       body: Column(
         children: [
+          // Предупреждение если комната не зашифрована
+          if (widget.room.getState('m.room.encryption') == null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: Colors.orange[100],
+              child: Row(
+                children: [
+                  Icon(Icons.lock_open, size: 18, color: Colors.orange[800]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Сквозное шифрование не включено. Ваши сообщения не защищены.",
+                      style: TextStyle(color: Colors.orange[900], fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           // Сообщения
           Expanded(
             child: _isLoading

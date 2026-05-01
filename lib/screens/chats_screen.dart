@@ -43,11 +43,15 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   Future<void> _createChat() async {
     final TextEditingController userController = TextEditingController();
+    // Сохраняем ScaffoldMessenger ДО показа диалога, чтобы использовать
+    // его после закрытия диалога (когда контекст диалога уже деактивирован)
+    final messenger = ScaffoldMessenger.of(context);
+
     await showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return StatefulBuilder(
-          builder: (context, setDialogState) {
+          builder: (dialogContext, setDialogState) {
             return AlertDialog(
               title: const Text("Начать чат"),
               content: Column(
@@ -82,55 +86,64 @@ class _ChatsScreenState extends State<ChatsScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () => Navigator.pop(dialogContext),
                   child: const Text("Отмена"),
                 ),
                 ElevatedButton(
                   onPressed: () async {
                     final username = userController.text.trim();
                     if (username.isEmpty) return;
-                    Navigator.pop(context);
+                    Navigator.pop(dialogContext);
+
                     try {
                       final userId = MatrixService.buildUserId(username);
+                      final wantEncryption = _encryptNewChat;
 
-                      // Создаём комнату с шифрованием или без
-                      if (_encryptNewChat) {
-                        // Шифрованный чат — сначала создаём, потом включаем шифрование
-                        final roomId = await widget.matrixService.client.createRoom(
-                          isDirect: true,
-                          invite: [userId],
-                          preset: CreateRoomPreset.privateChat,
-                          name: "Чат с $username",
-                        );
-                        // Включаем шифрование в комнате
+                      debugPrint('[E2EE] Creating chat with $userId, encryption=$wantEncryption');
+                      debugPrint('[E2EE] client.encryptionEnabled = ${widget.matrixService.client.encryptionEnabled}');
+
+                      // Используем startDirectChat — он корректно создаёт DM
+                      // с шифрованием через initialState (без гонки с sync)
+                      final roomId = await widget.matrixService.client.startDirectChat(
+                        userId,
+                        enableEncryption: wantEncryption,
+                        preset: CreateRoomPreset.privateChat,
+                      );
+
+                      debugPrint('[E2EE] Room created: $roomId');
+
+                      // Проверяем что комната действительно зашифрована
+                      if (wantEncryption) {
                         final room = widget.matrixService.client.getRoomById(roomId);
-                        if (room != null) {
-                          try {
-                            await room.enableEncryption();
-                            debugPrint('[E2EE] Encryption enabled for room $roomId');
-                          } catch (e) {
-                            debugPrint('[E2EE] Failed to enable encryption: $e');
+                        final isEncrypted = room?.getState('m.room.encryption') != null;
+                        debugPrint('[E2EE] Room encryption state: $isEncrypted');
+                        if (!isEncrypted) {
+                          debugPrint('[E2EE] Encryption not in initial state, enabling manually...');
+                          if (room != null) {
+                            try {
+                              await room.enableEncryption();
+                              debugPrint('[E2EE] Encryption enabled manually');
+                            } catch (e) {
+                              debugPrint('[E2EE] Manual enable failed: $e');
+                            }
+                          } else {
+                            debugPrint('[E2EE] Room not found yet, waiting for sync...');
                           }
                         }
-                      } else {
-                        await widget.matrixService.client.createRoom(
-                          isDirect: true,
-                          invite: [userId],
-                          preset: CreateRoomPreset.privateChat,
-                          name: "Чат с $username",
-                        );
                       }
+
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        messenger.showSnackBar(
                           SnackBar(
-                            content: Text(_encryptNewChat ? "Зашифрованный чат создан!" : "Чат создан!"),
+                            content: Text(wantEncryption ? "Зашифрованный чат создан!" : "Чат создан!"),
                             backgroundColor: Colors.green,
                           ),
                         );
                       }
                     } catch (e) {
+                      debugPrint('[E2EE] Create chat error: $e');
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        messenger.showSnackBar(
                           SnackBar(content: Text("Ошибка: $e")),
                         );
                       }
