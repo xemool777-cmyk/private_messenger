@@ -37,6 +37,9 @@ dependencies:
   # Уведомления
   flutter_local_notifications: ^17.0.0
 
+  # E2EE шифрование — нативная библиотека libolm
+  flutter_olm: ^2.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

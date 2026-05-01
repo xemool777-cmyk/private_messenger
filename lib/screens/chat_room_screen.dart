@@ -845,7 +845,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.room.displayname),
+        title: Row(
+          children: [
+            Flexible(child: Text(widget.room.displayname)),
+            if (widget.room.isEncrypted) ...[
+              const SizedBox(width: 6),
+              Icon(Icons.lock, size: 16, color: Colors.green[200]),
+            ],
+          ],
+        ),
       ),
       body: Column(
         children: [

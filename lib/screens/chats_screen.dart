@@ -39,55 +39,100 @@ class _ChatsScreenState extends State<ChatsScreen> {
     }
   }
 
+  bool _encryptNewChat = true;
+
   Future<void> _createChat() async {
     final TextEditingController userController = TextEditingController();
     await showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text("Начать чат"),
-          content: TextField(
-            controller: userController,
-            decoration: const InputDecoration(
-              labelText: "Имя пользователя (без @)",
-              hintText: "Например: user2",
-              prefixIcon: Icon(Icons.person_add),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Отмена"),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final username = userController.text.trim();
-                if (username.isEmpty) return;
-                Navigator.pop(context);
-                try {
-                  final userId = MatrixService.buildUserId(username);
-                  await widget.matrixService.client.createRoom(
-                    isDirect: true,
-                    invite: [userId],
-                    preset: CreateRoomPreset.privateChat,
-                    name: "Чат с $username",
-                  );
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Чат создан!")),
-                    );
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text("Ошибка: $e")),
-                    );
-                  }
-                }
-              },
-              child: const Text("Создать"),
-            ),
-          ],
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text("Начать чат"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: userController,
+                    decoration: const InputDecoration(
+                      labelText: "Имя пользователя (без @)",
+                      hintText: "Например: user2",
+                      prefixIcon: Icon(Icons.person_add),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    title: const Text("Шифрование"),
+                    subtitle: Text(
+                      _encryptNewChat ? "Сообщения зашифрованы" : "Без шифрования",
+                      style: TextStyle(
+                        color: _encryptNewChat ? Colors.green : Colors.grey,
+                        fontSize: 12,
+                      ),
+                    ),
+                    secondary: Icon(
+                      _encryptNewChat ? Icons.lock : Icons.lock_open,
+                      color: _encryptNewChat ? Colors.green : Colors.grey,
+                    ),
+                    value: _encryptNewChat,
+                    onChanged: (val) => setDialogState(() => _encryptNewChat = val),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Отмена"),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final username = userController.text.trim();
+                    if (username.isEmpty) return;
+                    Navigator.pop(context);
+                    try {
+                      final userId = MatrixService.buildUserId(username);
+                      await widget.matrixService.client.createRoom(
+                        isDirect: true,
+                        invite: [userId],
+                        preset: CreateRoomPreset.privateChat,
+                        name: "Чат с $username",
+                        creationContent: _encryptNewChat
+                            ? {'m.federate': false}
+                            : null,
+                        initialState: _encryptNewChat
+                            ? [
+                                StateEvent(
+                                  type: EventTypes.Encryption,
+                                  stateKey: '',
+                                  content: {
+                                    'algorithm': 'm.megolm.v1.aes-sha2',
+                                  },
+                                ),
+                              ]
+                            : [],
+                      );
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(_encryptNewChat ? "Зашифрованный чат создан!" : "Чат создан!"),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text("Ошибка: $e")),
+                        );
+                      }
+                    }
+                  },
+                  child: const Text("Создать"),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -195,15 +240,25 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     leading: CircleAvatar(
-                      backgroundColor: Colors.indigo[300],
-                      child: Text(
-                        room.displayname[0].toUpperCase(),
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
+                      backgroundColor: room.isEncrypted ? Colors.green[700] : Colors.indigo[300],
+                      child: room.isEncrypted
+                          ? const Icon(Icons.lock, color: Colors.white, size: 20)
+                          : Text(
+                              room.displayname[0].toUpperCase(),
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                            ),
                     ),
-                    title: Text(
-                      room.displayname,
-                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                    title: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            room.displayname,
+                            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        if (room.isEncrypted)
+                          Icon(Icons.lock, size: 14, color: Colors.green[600]),
+                      ],
                     ),
                     subtitle: Text(
                       lastEvent?.body ?? "Нет сообщений",

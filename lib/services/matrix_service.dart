@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_olm/flutter_olm.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path_provider/path_provider.dart';
 import 'notification_service.dart';
@@ -26,6 +27,14 @@ class MatrixService {
 
   /// Инициализация: Matrix клиент с Hive базой данных
   Future<void> init() async {
+    // Инициализируем libolm для E2EE шифрования
+    try {
+      await Olm.init();
+      debugPrint('[Matrix] Olm initialized successfully');
+    } catch (e) {
+      debugPrint('[Matrix] Olm init failed (E2EE will not work): $e');
+    }
+
     _client = Client(
       'PrivateMessenger',
       databaseBuilder: (_) async {
