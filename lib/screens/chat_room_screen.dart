@@ -7,6 +7,7 @@ import 'package:matrix/matrix.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/matrix_service.dart';
+import '../services/notification_service.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final MatrixService matrixService;
@@ -35,6 +36,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
+    // Помечаем что мы в этом чате (чтобы не показывать уведомление)
+    widget.matrixService.currentRoomId = widget.room.id;
+    // Убираем уведомление для этой комнаты
+    NotificationService.instance.cancelNotification(widget.room.id);
+
     _initTimeline();
 
     // Слушаем обновления комнаты — просто обновляем UI, НЕ пересоздаём таймлайн!
@@ -45,6 +51,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   @override
   void dispose() {
+    // Помечаем что мы вышли из чата
+    widget.matrixService.currentRoomId = null;
     _roomUpdateSub?.cancel();
     _scrollController.dispose();
     super.dispose();
