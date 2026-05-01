@@ -24,6 +24,25 @@
 
   <!-- Olm (E2EE library for Matrix) — MUST be loaded before Flutter -->
   <script src="olm.js"></script>
+  <script>
+    // Инициализируем Olm WASM ДО загрузки Flutter
+    // Это критично для E2EE: matrix SDK вызывает olm.init() внутри Client.init(),
+    // но WASM может не успеть загрузиться. Предзагрузка решает эту проблему.
+    if (typeof Olm !== 'undefined') {
+      window.__olmReady = Olm.init().then(function() {
+        console.log('[Olm] WASM initialized successfully, version: ' + Olm.get_library_version());
+        window.__olmInitialized = true;
+      }).catch(function(e) {
+        console.error('[Olm] WASM initialization FAILED:', e);
+        window.__olmInitialized = false;
+        window.__olmError = e.toString();
+      });
+    } else {
+      console.error('[Olm] olm.js not loaded! E2EE will NOT work.');
+      window.__olmInitialized = false;
+      window.__olmError = 'Olm global not found';
+    }
+  </script>
 
   <script>
     // The value below is injected by flutter build, do not touch.
@@ -35,16 +54,26 @@
 <body>
   <script>
     window.addEventListener('load', function(ev) {
-      // Download main.dart.js
-      _flutter.loader.loadEntrypoint({
-        serviceWorker: {
-          serviceWorkerVersion: serviceWorkerVersion,
-        },
-        onEntrypointLoaded: function(engineInitializer) {
-          engineInitializer.initializeEngine().then(function(appRunner) {
-            appRunner.runApp();
-          });
+      // Ждём пока Olm WASM загрузится ПЕРЕД запуском Flutter
+      // Это гарантирует что E2EE будет доступен когда matrix SDK вызовет olm.init()
+      var olmReady = window.__olmReady || Promise.resolve();
+      olmReady.then(function() {
+        if (window.__olmInitialized === false) {
+          console.warn('[Olm] E2EE will be disabled - WASM init failed: ' + (window.__olmError || 'unknown'));
+        } else {
+          console.log('[Olm] Ready, starting Flutter app...');
         }
+        // Download main.dart.js
+        _flutter.loader.loadEntrypoint({
+          serviceWorker: {
+            serviceWorkerVersion: serviceWorkerVersion,
+          },
+          onEntrypointLoaded: function(engineInitializer) {
+            engineInitializer.initializeEngine().then(function(appRunner) {
+              appRunner.runApp();
+            });
+          }
+        });
       });
     });
   </script>

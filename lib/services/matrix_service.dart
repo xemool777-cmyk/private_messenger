@@ -6,6 +6,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:olm/olm.dart' as olm;
 import 'notification_service.dart';
 
+/// Глобальный флаг: был ли olm инициализирован вручную на веб
+bool _olmPreInitialized = false;
+
 /// Сервис управления Matrix клиентом
 /// Отвечает за инициализацию, логин, регистрацию, синхронизацию, уведомления
 class MatrixService {
@@ -28,6 +31,21 @@ class MatrixService {
 
   /// Инициализация: Matrix клиент с Hive базой данных
   Future<void> init() async {
+    // На веб ПРЕДЗАГРУЖАЕМ olm WASM-модуль ДО создания клиента
+    // Это критично: Client.init() внутри login() может не дождаться загрузки WASM
+    if (kIsWeb && !_olmPreInitialized) {
+      try {
+        debugPrint('[Matrix] WEB: Pre-initializing olm WASM module...');
+        await olm.init();
+        final version = olm.get_library_version();
+        debugPrint('[Matrix] WEB: olm pre-init OK, version: $version');
+        _olmPreInitialized = true;
+      } catch (e) {
+        debugPrint('[Matrix] WEB: olm pre-init FAILED: $e');
+        debugPrint('[Matrix] WEB: E2EE will NOT work. Check that web/olm.js and web/olm.wasm exist.');
+      }
+    }
+
     // На веб используем IndexedDB (путь не нужен), на нативных — файловая система
     _client = Client(
       'PrivateMessenger',
@@ -57,22 +75,12 @@ class MatrixService {
     debugPrint('[Matrix] Encryption enabled: ${_client.encryptionEnabled}');
     debugPrint('[Matrix] Encryption object: ${_client.encryption != null ? "present" : "NULL"}');
 
-    // Дополнительная диагностика E2EE на веб
-    if (kIsWeb && !_client.encryptionEnabled) {
-      debugPrint('[Matrix] WEB: E2EE is NOT working. olm.js may not be loaded correctly.');
-      debugPrint('[Matrix] WEB: Check that web/olm.js exists and is loaded in index.html');
-      // Пробуем инициализировать Olm вручную чтобы увидеть ошибку
-      try {
-        await olm.init();
-        debugPrint('[Matrix] WEB: olm.init() succeeded manually! But Client.init() failed to use it.');
-      } catch (e2) {
-        debugPrint('[Matrix] WEB: olm.init() failed: $e2');
-      }
-    }
-
+    // E2EE диагностика
     if (_client.encryptionEnabled) {
       debugPrint('[Matrix] Identity key: ${_client.identityKey}');
       debugPrint('[Matrix] Fingerprint key: ${_client.fingerprintKey}');
+    } else if (kIsWeb) {
+      debugPrint('[Matrix] WEB: E2EE not yet enabled (expected before login). olm pre-init: $_olmPreInitialized');
     }
 
     // Если уже залогинен — подключаемся к homeserver чтобы API работал
@@ -94,6 +102,9 @@ class MatrixService {
 
   /// Слушаем синхронизацию и показываем уведомления о новых сообщениях
   void _startListeningForNotifications() {
+    // Множество уже обработанных событий (чтобы не дублировать уведомления)
+    final processedEventIds = <String>{};
+
     _syncSub = _client.onSync.stream.listen((syncUpdate) {
       final joinedRooms = syncUpdate.rooms?.join;
       if (joinedRooms == null || joinedRooms.isEmpty) return;
@@ -109,12 +120,21 @@ class MatrixService {
         for (final matrixEvent in timelineEvents) {
           final eventType = matrixEvent.type;
           final senderId = matrixEvent.senderId;
+          final eventId = matrixEvent.eventId;
+
+          // Пропускаем дубликаты
+          if (eventId != null && processedEventIds.contains(eventId)) continue;
+          if (eventId != null) processedEventIds.add(eventId);
+
+          // Очищаем старые ID (держим максимум 200)
+          if (processedEventIds.length > 200) {
+            processedEventIds.remove(processedEventIds.first);
+          }
 
           // Пропускаем свои же сообщения
           if (senderId == _client.userID) continue;
 
           // Обычные сообщения и зашифрованные сообщения
-          // В зашифрованных комнатах сообщения приходят как m.room.encrypted
           if (eventType != 'm.room.message' && eventType != 'm.room.encrypted') continue;
 
           // Не показываем уведомление если мы сейчас в этом чате
@@ -123,6 +143,9 @@ class MatrixService {
           // Получаем комнату
           final room = _client.getRoomById(roomId);
           if (room == null) continue;
+
+          // Проверяем — зашифрованная ли комната
+          final isEncryptedRoom = room.getState('m.room.encryption') != null;
 
           // Имя отправителя — из участников комнаты
           String senderName = senderId?.localpart ?? 'Неизвестный';
@@ -139,24 +162,42 @@ class MatrixService {
           String messageText;
 
           if (eventType == 'm.room.encrypted') {
-            // Зашифрованное сообщение — показываем общее уведомление
-            // Расшифровка произойдёт позже когда SDK обработает событие
-            messageText = '🔐 Зашифрованное сообщение';
-            debugPrint('[NOTIFY] Encrypted message in $roomId from $senderName');
-          } else {
-            // Обычное сообщение — извлекаем текст
+            // Сырое зашифрованное событие из sync — показываем общее уведомление
+            messageText = 'Новое зашифрованное сообщение';
+            debugPrint('[NOTIFY] Encrypted event in $roomId from $senderName');
+          } else if (isEncryptedRoom && eventType == 'm.room.message') {
+            // SDK расшифровал событие и заменил тип на m.room.message
+            // Пытаемся получить текст из контента
             final content = matrixEvent.content;
             final msgtype = content['msgtype'] as String? ?? '';
             final body = content['body'] as String? ?? '';
 
             if (msgtype == 'm.image') {
-              messageText = '📷 Фото';
+              messageText = 'Фото';
             } else if (msgtype == 'm.file') {
-              messageText = '📎 Файл';
+              messageText = 'Файл';
             } else if (msgtype == 'm.audio') {
-              messageText = '🎵 Аудио';
+              messageText = 'Аудио';
             } else if (msgtype == 'm.video') {
-              messageText = '🎬 Видео';
+              messageText = 'Видео';
+            } else {
+              messageText = body.isNotEmpty ? body : 'Новое сообщение';
+            }
+            debugPrint('[NOTIFY] Decrypted message in $roomId from $senderName: $messageText');
+          } else {
+            // Обычное (не зашифрованное) сообщение
+            final content = matrixEvent.content;
+            final msgtype = content['msgtype'] as String? ?? '';
+            final body = content['body'] as String? ?? '';
+
+            if (msgtype == 'm.image') {
+              messageText = 'Фото';
+            } else if (msgtype == 'm.file') {
+              messageText = 'Файл';
+            } else if (msgtype == 'm.audio') {
+              messageText = 'Аудио';
+            } else if (msgtype == 'm.video') {
+              messageText = 'Видео';
             } else {
               messageText = body.isNotEmpty ? body : 'Новое сообщение';
             }
@@ -215,6 +256,26 @@ class MatrixService {
     }
     _cachedUserId = _client.userID;
     debugPrint('[Matrix] After login: userID = $_cachedUserId');
+
+    // КРИТИЧЕСКАЯ ПРОВЕРКА: работает ли E2EE после логина
+    debugPrint('[Matrix] After login: encryptionEnabled = ${_client.encryptionEnabled}');
+    debugPrint('[Matrix] After login: encryption = ${_client.encryption != null ? "present" : "NULL"}');
+    if (_client.encryptionEnabled) {
+      debugPrint('[Matrix] E2EE WORKING! Identity key: ${_client.identityKey}');
+      debugPrint('[Matrix] E2EE WORKING! Fingerprint key: ${_client.fingerprintKey}');
+    } else {
+      debugPrint('[Matrix] WARNING: E2EE is NOT enabled after login!');
+      if (kIsWeb) {
+        debugPrint('[Matrix] WEB: E2EE failed. olm was pre-initialized: $_olmPreInitialized');
+        debugPrint('[Matrix] WEB: This means Client.init() inside login() failed to set up encryption.');
+        debugPrint('[Matrix] WEB: Possible causes:');
+        debugPrint('[Matrix] WEB:   1. olm.wasm not found or CORS blocked');
+        debugPrint('[Matrix] WEB:   2. uploadKeys() failed (network/CORS)');
+        debugPrint('[Matrix] WEB:   3. Browser too old for WASM');
+      } else {
+        debugPrint('[Matrix] NATIVE: E2EE failed! flutter_olm may not be linked correctly.');
+      }
+    }
     // Синхронизация запускается автоматически через init() внутри login()
   }
 
@@ -227,6 +288,14 @@ class MatrixService {
       }
       // Один ручной sync чтобы обновить данные
       await _client.oneShotSync();
+
+      // Проверяем E2EE при восстановлении сессии
+      debugPrint('[Matrix] Session restored: encryptionEnabled = ${_client.encryptionEnabled}');
+      if (_client.encryptionEnabled) {
+        debugPrint('[Matrix] E2EE OK after session restore. Identity: ${_client.identityKey}');
+      } else {
+        debugPrint('[Matrix] WARNING: E2EE not enabled after session restore!');
+      }
     }
   }
 
