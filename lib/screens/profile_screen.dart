@@ -37,10 +37,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadProfile() async {
     final client = widget.matrixService.client;
-    _userId = client.userID ?? '';
-    _displayName = client.getDisplayName() ?? _userId.localpart ?? '';
+    _userId = widget.matrixService.userId;
+
+    // Если userID пуст — пробуем синхронизацию чтобы обновить
+    if (_userId.isEmpty) {
+      debugPrint('[PROFILE] userID is null, trying sync...');
+      try {
+        await client.oneShotSync();
+        _userId = widget.matrixService.userId;
+      } catch (_) {}
+    }
+
+    if (_userId.isEmpty) {
+      debugPrint('[PROFILE] userID still null, cannot load profile');
+      if (mounted) setState(() { _isLoading = false; });
+      return;
+    }
+
+    _displayName = (client.getDisplayName(_userId) as String?) ?? _extractLocalpart(_userId);
     _nameController.text = _displayName;
-    _avatarUrl = client.getAvatarUrl();
+    _avatarUrl = await client.getAvatarUrl(_userId);
 
     // Загружаем аватар если есть
     if (_avatarUrl != null) {
@@ -110,13 +126,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() { _isSaving = true; });
 
     try {
+      if (_userId.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Ошибка: не удалось определить пользователя"), backgroundColor: Colors.red),
+        );
+        return;
+      }
+
       final client = widget.matrixService.client;
       bool changed = false;
 
       // Сохраняем отображаемое имя
       final newName = _nameController.text.trim();
       if (newName.isNotEmpty && newName != _displayName) {
-        await client.setDisplayName(newName);
+        await client.setDisplayName(_userId, newName);
         _displayName = newName;
         changed = true;
       }
@@ -329,6 +352,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
     );
+  }
+
+  /// Извлечь localpart из Matrix ID: @username:server → username
+  String _extractLocalpart(String userId) {
+    if (userId.startsWith('@') && userId.contains(':')) {
+      return userId.substring(1, userId.indexOf(':'));
+    }
+    return userId;
   }
 
   Widget _avatarPlaceholder() {

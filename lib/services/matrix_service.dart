@@ -13,6 +13,10 @@ class MatrixService {
   late final Client _client;
   Client get client => _client;
 
+  /// Кэшированный userId (client.userID может быть null после восстановления сессии)
+  String? _cachedUserId;
+  String get userId => _cachedUserId ?? _client.userID ?? '';
+
   StreamSubscription? _syncSub;
 
   /// Текущая открытая комната (чтобы не показывать уведомление для неё)
@@ -34,6 +38,8 @@ class MatrixService {
 
     // Инициализация клиента — запускает синхронизацию если уже залогинен
     await _client.init();
+    _cachedUserId = _client.userID;
+    debugPrint('[Matrix] After init: userID = $_cachedUserId');
 
     // Инициализируем сервис уведомлений
     await NotificationService.instance.init();
@@ -150,6 +156,8 @@ class MatrixService {
         rethrow;
       }
     }
+    _cachedUserId = _client.userID;
+    debugPrint('[Matrix] After login: userID = $_cachedUserId');
     // Синхронизация запускается автоматически через init() внутри login()
   }
 
