@@ -54,7 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    _displayName = (client.getDisplayName(_userId) as String?) ?? _extractLocalpart(_userId);
+    _displayName = await client.getDisplayName(_userId) ?? _extractLocalpart(_userId);
     _nameController.text = _displayName;
     _avatarUrl = await client.getAvatarUrl(_userId);
 
