@@ -54,9 +54,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    _displayName = await client.getDisplayName(_userId) ?? _extractLocalpart(_userId);
+    try {
+      _displayName = await client.getDisplayName(_userId) ?? _extractLocalpart(_userId);
+    } catch (e) {
+      debugPrint('[PROFILE] getDisplayName failed: $e');
+      _displayName = _extractLocalpart(_userId);
+    }
     _nameController.text = _displayName;
-    _avatarUrl = await client.getAvatarUrl(_userId);
+
+    try {
+      _avatarUrl = await client.getAvatarUrl(_userId);
+    } catch (e) {
+      debugPrint('[PROFILE] getAvatarUrl failed: $e');
+    }
 
     // Загружаем аватар если есть
     if (_avatarUrl != null) {

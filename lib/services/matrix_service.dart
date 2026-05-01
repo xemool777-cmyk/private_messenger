@@ -41,6 +41,16 @@ class MatrixService {
     _cachedUserId = _client.userID;
     debugPrint('[Matrix] After init: userID = $_cachedUserId');
 
+    // Если уже залогинен — подключаемся к homeserver чтобы API работал
+    if (_client.isLogged()) {
+      try {
+        await _client.checkHomeserver(Uri.parse(homeserverUrl));
+        debugPrint('[Matrix] Homeserver reconnected for existing session');
+      } catch (e) {
+        debugPrint('[Matrix] Failed to reconnect homeserver: $e');
+      }
+    }
+
     // Инициализируем сервис уведомлений
     await NotificationService.instance.init();
 
@@ -136,6 +146,13 @@ class MatrixService {
   /// Логин пользователя
   /// После login() синхронизация запускается автоматически
   Future<void> login(String username, String password) async {
+    // Если уже залогинен — не логинимся повторно
+    if (_client.isLogged()) {
+      debugPrint('[Matrix] Already logged in, skipping login');
+      _cachedUserId = _client.userID;
+      return;
+    }
+
     await connectToHomeserver();
 
     try {
