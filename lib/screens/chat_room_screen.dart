@@ -26,6 +26,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _isLoadingHistory = false;
   bool _isSending = false;
   StreamSubscription? _roomUpdateSub;
+  StreamSubscription? _keyReceivedSub;
   bool _canLoadMoreHistory = true;
 
   // Кэш загруженных картинок (eventId → байты)
@@ -47,6 +48,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _roomUpdateSub = widget.room.onUpdate.stream.listen((_) {
       if (mounted) setState(() {});
     });
+
+    // Слушаем получение ключей расшифровки — обновляем UI когда приходят ключи
+    _keyReceivedSub = widget.room.onSessionKeyReceived.stream.listen((_) {
+      debugPrint('[E2EE] Session key received, updating UI');
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -54,6 +61,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     // Помечаем что мы вышли из чата
     widget.matrixService.currentRoomId = null;
     _roomUpdateSub?.cancel();
+    _keyReceivedSub?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -77,6 +85,26 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       if (mounted) {
         setState(() { _isLoading = false; });
         _scrollToBottom();
+      }
+
+      // Если комната зашифрована — запрашиваем ключи для нерасшифрованных событий
+      // Это нужно когда входим с нового устройства (ключей нет)
+      final isEncrypted = widget.room.getState('m.room.encryption') != null;
+      if (isEncrypted && _timeline != null) {
+        final undecrypted = _timeline!.events.where(
+          (e) => e.type == EventTypes.Encrypted || e.messageType == MessageTypes.BadEncrypted
+        ).length;
+        if (undecrypted > 0) {
+          debugPrint('[E2EE] $undecrypted undecrypted events, requesting keys...');
+          try {
+            await _timeline!.requestKeys();
+            debugPrint('[E2EE] Key request sent');
+            // После запроса ключей — обновляем UI (ключи могут прийти позже)
+            if (mounted) setState(() {});
+          } catch (e) {
+            debugPrint('[E2EE] Key request failed: $e');
+          }
+        }
       }
 
       // Слушаем прокрутку вверх для подгрузки истории
@@ -131,6 +159,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         _scrollController.jumpTo(_scrollController.position.minScrollExtent);
       }
     });
+  }
+
+  /// Проверяем есть ли нерасшифрованные события в таймлайне
+  bool _hasUndecryptedEvents() {
+    if (_timeline == null) return false;
+    return _timeline!.events.any(
+      (e) => e.type == EventTypes.Encrypted || e.messageType == MessageTypes.BadEncrypted
+    );
   }
 
   // ===================== ОТПРАВКА ТЕКСТА =====================
@@ -413,6 +449,43 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   Widget _buildMessageContent(Event event, bool isMe) {
     final msgType = event.messageType;
+
+    // --- Нерасшифрованное сообщение ---
+    if (msgType == MessageTypes.BadEncrypted || event.type == EventTypes.Encrypted) {
+      final canRequest = event.content['can_request_session'] == true;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_outline, size: 16, color: isMe ? Colors.white70 : Colors.orange[700]),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  "Не удалось расшифровать",
+                  style: TextStyle(
+                    color: isMe ? Colors.white70 : Colors.orange[700],
+                    fontSize: 14,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            canRequest
+                ? "Ключи запрошены у других устройств. Подождите..."
+                : "Войдите с устройства, где есть ключи расшифровки",
+            style: TextStyle(
+              color: isMe ? Colors.white54 : Colors.grey[500],
+              fontSize: 11,
+            ),
+          ),
+        ],
+      );
+    }
 
     // --- Картинка ---
     if (msgType == MessageTypes.Image) {
@@ -863,6 +936,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 ],
               ),
             ),
+          // Предупреждение о новом устройстве в зашифрованной комнате
+          if (widget.room.getState('m.room.encryption') != null && _timeline != null && _hasUndecryptedEvents())
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: Colors.amber[100],
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 18, color: Colors.amber[800]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Некоторые сообщения не удалось расшифровать. "
+                      "Ключи запрошены у ваших других устройств. "
+                      "Если ключи не придут — войдите с устройства, где есть доступ к чату.",
+                      style: TextStyle(color: Colors.amber[900], fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           // Сообщения
           Expanded(
             child: _isLoading
@@ -904,7 +998,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           final event = events[index];
                           final isMe = event.senderId == client.userID;
 
-                          if (event.type != EventTypes.Message) return const SizedBox.shrink();
+                          if (event.type != EventTypes.Message && event.type != EventTypes.Encrypted) return const SizedBox.shrink();
 
                           final showDateHeader = index == events.length - 1 ||
                               events[index + 1].originServerTs.day != event.originServerTs.day;

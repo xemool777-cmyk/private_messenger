@@ -23,6 +23,7 @@ class MatrixService {
   String get userId => _cachedUserId ?? _client.userID ?? '';
 
   StreamSubscription? _syncSub;
+  bool _firstSyncDone = false;
 
   /// Текущая открытая комната (чтобы не показывать уведомление для неё)
   String? _currentRoomId;
@@ -108,6 +109,13 @@ class MatrixService {
     _syncSub = _client.onSync.stream.listen((syncUpdate) {
       final joinedRooms = syncUpdate.rooms?.join;
       if (joinedRooms == null || joinedRooms.isEmpty) return;
+
+      // После первого sync — запрашиваем ключи для зашифрованных комнат
+      // Это критично для новых устройств, у которых нет ключей Megolm
+      if (!_firstSyncDone && _client.encryptionEnabled) {
+        _firstSyncDone = true;
+        _requestKeysForEncryptedRooms();
+      }
 
       for (final entry in joinedRooms.entries) {
         final roomId = entry.key;
@@ -214,6 +222,35 @@ class MatrixService {
         }
       }
     });
+  }
+
+  /// Запрос ключей расшифровки для всех зашифрованных комнат
+  /// Вызывается после первого sync, чтобы новое устройство могло расшифровать историю
+  Future<void> _requestKeysForEncryptedRooms() async {
+    if (!_client.encryptionEnabled) return;
+
+    try {
+      final encryptedRooms = _client.rooms.where(
+        (room) => room.getState('m.room.encryption') != null,
+      );
+
+      for (final room in encryptedRooms) {
+        try {
+          // Проверяем последнее событие — если не расшифровано, запрашиваем ключ
+          final lastEvent = room.lastEvent;
+          if (lastEvent != null &&
+              (lastEvent.type == EventTypes.Encrypted ||
+               lastEvent.messageType == MessageTypes.BadEncrypted)) {
+            debugPrint('[E2EE] Requesting key for room ${room.id} via event.requestKey()');
+            await lastEvent.requestKey();
+          }
+        } catch (e) {
+          debugPrint('[E2EE] Key request failed for room ${room.id}: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('[E2EE] Error requesting keys: $e');
+    }
   }
 
   /// Проверка — пользователь уже залогинен?

@@ -36,7 +36,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   void _loadRooms() {
     if (mounted) {
-      setState(() { _rooms = widget.matrixService.client.rooms; });
+      // Показываем только комнаты где мы участник (не покинутые)
+      setState(() {
+        _rooms = widget.matrixService.client.rooms.where(
+          (room) => room.membership == Membership.join,
+        ).toList();
+      });
     }
   }
 
@@ -211,11 +216,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
   /// Удаление чата (покинуть комнату + забыть)
   Future<void> _deleteChat(Room room) async {
     final messenger = ScaffoldMessenger.of(context);
+    final roomId = room.id;
+    final roomName = room.displayname;
     final confirm = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text("Удалить чат"),
-        content: Text("Покинуть чат «${room.displayname}»?\nСообщения будут удалены только у вас."),
+        content: Text("Покинуть чат «$roomName»?\nСообщения будут удалены только у вас."),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
@@ -237,17 +244,37 @@ class _ChatsScreenState extends State<ChatsScreen> {
     if (confirm == null) return;
 
     try {
-      if (room.membership == Membership.join) {
-        await room.leave();
-        debugPrint('[CHAT] Left room ${room.id}');
+      // Покидаем комнату если ещё участник
+      if (room.membership == Membership.join || room.membership == Membership.invite) {
+        try {
+          await widget.matrixService.client.leaveRoom(roomId);
+          debugPrint('[CHAT] Left room $roomId');
+        } catch (e) {
+          // Возможно уже не участник — не критично
+          debugPrint('[CHAT] Leave room error (may be already left): $e');
+        }
       }
 
+      // Удаляем (forget) комнату полностью
       if (confirm == 'forget') {
-        await widget.matrixService.client.forgetRoom(room.id);
-        debugPrint('[CHAT] Forgot room ${room.id}');
+        try {
+          await widget.matrixService.client.forgetRoom(roomId);
+          debugPrint('[CHAT] Forgot room $roomId');
+        } catch (e) {
+          debugPrint('[CHAT] Forget room error: $e');
+          // Пробуем альтернативный способ
+          try {
+            await room.forget();
+            debugPrint('[CHAT] Forgot room via room.forget() $roomId');
+          } catch (e2) {
+            debugPrint('[CHAT] Room.forget() also failed: $e2');
+          }
+        }
       }
 
+      // Обновляем список чатов
       _loadRooms();
+
       if (mounted) {
         messenger.showSnackBar(
           SnackBar(
@@ -258,6 +285,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
       }
     } catch (e) {
       debugPrint('[CHAT] Error deleting room: $e');
+      // Даже при ошибке обновляем список — комната могла удалиться частично
+      _loadRooms();
       if (mounted) {
         messenger.showSnackBar(
           SnackBar(content: Text("Ошибка: $e")),
@@ -318,6 +347,24 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   final lastEvent = room.lastEvent;
                   final isEncrypted = room.getState('m.room.encryption') != null;
 
+                  // Текст последнего сообщения
+                  String lastMessageText;
+                  if (lastEvent == null) {
+                    lastMessageText = "Нет сообщений";
+                  } else if (lastEvent.messageType == MessageTypes.BadEncrypted || lastEvent.type == EventTypes.Encrypted) {
+                    lastMessageText = "Зашифрованное сообщение";
+                  } else if (lastEvent.messageType == MessageTypes.Image) {
+                    lastMessageText = "Фото";
+                  } else if (lastEvent.messageType == MessageTypes.File) {
+                    lastMessageText = "Файл";
+                  } else if (lastEvent.messageType == MessageTypes.Audio) {
+                    lastMessageText = "Аудио";
+                  } else if (lastEvent.messageType == MessageTypes.Video) {
+                    lastMessageText = "Видео";
+                  } else {
+                    lastMessageText = lastEvent.body ?? "Нет сообщений";
+                  }
+
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     leading: CircleAvatar(
@@ -342,7 +389,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       ],
                     ),
                     subtitle: Text(
-                      lastEvent?.body ?? "Нет сообщений",
+                      lastMessageText,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(color: Colors.grey[600]),
