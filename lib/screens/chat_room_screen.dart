@@ -97,7 +97,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         if (undecrypted > 0) {
           debugPrint('[E2EE] $undecrypted undecrypted events, requesting keys...');
           try {
-            await _timeline!.requestKeys();
+            _timeline!.requestKeys();
             debugPrint('[E2EE] Key request sent');
             // После запроса ключей — обновляем UI (ключи могут прийти позже)
             if (mounted) setState(() {});
