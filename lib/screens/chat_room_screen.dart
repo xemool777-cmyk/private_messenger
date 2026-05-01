@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/matrix_service.dart';
@@ -618,24 +618,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     debugPrint("[IMAGE] MSC3916 URL: $url");
 
     try {
-      final httpClient = HttpClient();
-      try {
-        httpClient.badCertificateCallback = (cert, host, port) => true;
-        final request = await httpClient.getUrl(Uri.parse(url));
-        request.headers.set('Authorization', 'Bearer $accessToken');
-        final response = await request.close();
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $accessToken'},
+      );
 
-        if (response.statusCode == 200) {
-          final builder = await response.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d));
-          debugPrint("[IMAGE] MSC3916 download OK: ${builder.length} bytes");
-          return builder.toBytes();
-        } else {
-          final body = await response.fold<String>('', (s, d) => s + String.fromCharCodes(d));
-          debugPrint("[IMAGE] MSC3916 status ${response.statusCode}: $body");
-          return null;
-        }
-      } finally {
-        httpClient.close();
+      if (response.statusCode == 200) {
+        debugPrint("[IMAGE] MSC3916 download OK: ${response.bodyBytes.length} bytes");
+        return Uint8List.fromList(response.bodyBytes);
+      } else {
+        debugPrint("[IMAGE] MSC3916 status ${response.statusCode}: ${response.body}");
+        return null;
       }
     } catch (e) {
       debugPrint("[IMAGE] MSC3916 error: $e");
@@ -661,22 +654,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     for (final url in urls) {
       try {
         debugPrint("[IMAGE] Legacy: $url");
-        final httpClient = HttpClient();
-        try {
-          httpClient.badCertificateCallback = (cert, host, port) => true;
-          final request = await httpClient.getUrl(Uri.parse(url));
-          request.headers.set('Authorization', 'Bearer $accessToken');
-          final response = await request.close();
+        final response = await http.get(
+          Uri.parse(url),
+          headers: {'Authorization': 'Bearer $accessToken'},
+        );
 
-          if (response.statusCode == 200) {
-            final builder = await response.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d));
-            debugPrint("[IMAGE] Legacy OK: ${builder.length} bytes");
-            return builder.toBytes();
-          } else {
-            debugPrint("[IMAGE] Legacy status ${response.statusCode}");
-          }
-        } finally {
-          httpClient.close();
+        if (response.statusCode == 200) {
+          debugPrint("[IMAGE] Legacy OK: ${response.bodyBytes.length} bytes");
+          return Uint8List.fromList(response.bodyBytes);
+        } else {
+          debugPrint("[IMAGE] Legacy status ${response.statusCode}");
         }
       } catch (e) {
         debugPrint("[IMAGE] Legacy error: $e");
@@ -1121,19 +1108,13 @@ class _FullScreenImageViewState extends State<_FullScreenImageView> {
     final url = '${homeserver.scheme}://${homeserver.host}/_matrix/client/v1/media/download/$serverName/$mediaId';
 
     try {
-      final httpClient = HttpClient();
-      try {
-        httpClient.badCertificateCallback = (cert, host, port) => true;
-        final request = await httpClient.getUrl(Uri.parse(url));
-        request.headers.set('Authorization', 'Bearer $accessToken');
-        final response = await request.close();
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $accessToken'},
+      );
 
-        if (response.statusCode == 200) {
-          final builder = await response.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d));
-          return builder.toBytes();
-        }
-      } finally {
-        httpClient.close();
+      if (response.statusCode == 200) {
+        return Uint8List.fromList(response.bodyBytes);
       }
     } catch (_) {}
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:matrix/matrix.dart';
 import '../services/matrix_service.dart';
 import 'chat_room_screen.dart';
@@ -207,6 +208,64 @@ class _ChatsScreenState extends State<ChatsScreen> {
     return "${date.hour}:${date.minute.toString().padLeft(2, '0')}";
   }
 
+  /// Удаление чата (покинуть комнату + забыть)
+  Future<void> _deleteChat(Room room) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final confirm = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text("Удалить чат"),
+        content: Text("Покинуть чат «${room.displayname}»?\nСообщения будут удалены только у вас."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text("Отмена"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'leave'),
+            child: const Text("Покинуть", style: TextStyle(color: Colors.orange)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, 'forget'),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text("Удалить", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == null) return;
+
+    try {
+      if (room.membership == Membership.join) {
+        await room.leave();
+        debugPrint('[CHAT] Left room ${room.id}');
+      }
+
+      if (confirm == 'forget') {
+        await widget.matrixService.client.forgetRoom(room.id);
+        debugPrint('[CHAT] Forgot room ${room.id}');
+      }
+
+      _loadRooms();
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(confirm == 'forget' ? "Чат удалён" : "Вы покинули чат"),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[CHAT] Error deleting room: $e');
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text("Ошибка: $e")),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -305,6 +364,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         ),
                       );
                     },
+                    onLongPress: () => _deleteChat(room),
                   );
                 },
               ),

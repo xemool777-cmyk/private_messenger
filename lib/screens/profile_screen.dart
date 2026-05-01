@@ -1,7 +1,7 @@
-import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import '../services/matrix_service.dart';
 
@@ -88,19 +88,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final url = '${homeserver.scheme}://${homeserver.host}/_matrix/client/v1/media/download/$serverName/$mediaId';
 
     try {
-      final httpClient = HttpClient();
-      try {
-        httpClient.badCertificateCallback = (cert, host, port) => true;
-        final request = await httpClient.getUrl(Uri.parse(url));
-        request.headers.set('Authorization', 'Bearer $accessToken');
-        final response = await request.close();
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $accessToken'},
+      );
 
-        if (response.statusCode == 200) {
-          final builder = await response.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d));
-          return builder.toBytes();
-        }
-      } finally {
-        httpClient.close();
+      if (response.statusCode == 200) {
+        return Uint8List.fromList(response.bodyBytes);
       }
     } catch (e) {
       debugPrint('[PROFILE] Avatar download error: $e');

@@ -13,9 +13,6 @@ dependencies:
   # Matrix SDK (ядро мессенджера)
   matrix: ^0.22.0
 
-  # WebRTC для видеозвонков
-  flutter_webrtc: ^0.9.48
-
   # Bridgefy для офлайн mesh (требует ключ API)
   # Если Bridgefy не подключится, можно будет закомментировать эту строку
   # bridgefy: ^1.0.0 
@@ -26,9 +23,8 @@ dependencies:
   
   # Утилиты
   path_provider: ^2.1.1
-  connectivity_plus: ^5.0.2
-  permission_handler: ^11.0.1
   cupertino_icons: ^1.0.6
+  http: ^1.2.0
 
   # Медиа
   image_picker: ^1.0.7

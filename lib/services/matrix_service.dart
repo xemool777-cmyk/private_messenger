@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path_provider/path_provider.dart';
@@ -26,16 +27,21 @@ class MatrixService {
 
   /// Инициализация: Matrix клиент с Hive базой данных
   Future<void> init() async {
-    // flutter_olm предоставляет нативную libolm.so для Android
-    // Matrix SDK автоматически найдёт её при client.init()
-
+    // На веб используем IndexedDB (путь не нужен), на нативных — файловая система
     _client = Client(
       'PrivateMessenger',
       databaseBuilder: (_) async {
-        final dir = await getApplicationSupportDirectory();
-        final db = HiveCollectionsDatabase('private_messenger_db', dir.path);
-        await db.open();
-        return db;
+        if (kIsWeb) {
+          // На веб Hive автоматически использует IndexedDB
+          final db = HiveCollectionsDatabase('private_messenger_db', 'private_messenger_db');
+          await db.open();
+          return db;
+        } else {
+          final dir = await getApplicationSupportDirectory();
+          final db = HiveCollectionsDatabase('private_messenger_db', dir.path);
+          await db.open();
+          return db;
+        }
       },
     );
 
