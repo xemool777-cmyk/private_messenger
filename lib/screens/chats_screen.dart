@@ -92,26 +92,34 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     Navigator.pop(context);
                     try {
                       final userId = MatrixService.buildUserId(username);
-                      await widget.matrixService.client.createRoom(
-                        isDirect: true,
-                        invite: [userId],
-                        preset: CreateRoomPreset.privateChat,
-                        name: "Чат с $username",
-                        creationContent: _encryptNewChat
-                            ? {'m.federate': false}
-                            : null,
-                        initialState: _encryptNewChat
-                            ? [
-                                StateEvent(
-                                  type: EventTypes.Encryption,
-                                  stateKey: '',
-                                  content: {
-                                    'algorithm': 'm.megolm.v1.aes-sha2',
-                                  },
-                                ),
-                              ]
-                            : [],
-                      );
+
+                      // Создаём комнату с шифрованием или без
+                      if (_encryptNewChat) {
+                        // Шифрованный чат — сначала создаём, потом включаем шифрование
+                        final roomId = await widget.matrixService.client.createRoom(
+                          isDirect: true,
+                          invite: [userId],
+                          preset: CreateRoomPreset.privateChat,
+                          name: "Чат с $username",
+                        );
+                        // Включаем шифрование в комнате
+                        final room = widget.matrixService.client.getRoomById(roomId);
+                        if (room != null) {
+                          try {
+                            await room.enableEncryption();
+                            debugPrint('[E2EE] Encryption enabled for room $roomId');
+                          } catch (e) {
+                            debugPrint('[E2EE] Failed to enable encryption: $e');
+                          }
+                        }
+                      } else {
+                        await widget.matrixService.client.createRoom(
+                          isDirect: true,
+                          invite: [userId],
+                          preset: CreateRoomPreset.privateChat,
+                          name: "Чат с $username",
+                        );
+                      }
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
@@ -236,12 +244,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 itemBuilder: (context, index) {
                   final room = _rooms[index];
                   final lastEvent = room.lastEvent;
+                  final isEncrypted = room.getState('m.room.encryption') != null;
 
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     leading: CircleAvatar(
-                      backgroundColor: room.isEncrypted ? Colors.green[700] : Colors.indigo[300],
-                      child: room.isEncrypted
+                      backgroundColor: isEncrypted ? Colors.green[700] : Colors.indigo[300],
+                      child: isEncrypted
                           ? const Icon(Icons.lock, color: Colors.white, size: 20)
                           : Text(
                               room.displayname[0].toUpperCase(),
@@ -256,7 +265,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
                           ),
                         ),
-                        if (room.isEncrypted)
+                        if (isEncrypted)
                           Icon(Icons.lock, size: 14, color: Colors.green[600]),
                       ],
                     ),

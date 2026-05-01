@@ -848,7 +848,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         title: Row(
           children: [
             Flexible(child: Text(widget.room.displayname)),
-            if (widget.room.isEncrypted) ...[
+            if (widget.room.getState('m.room.encryption') != null) ...[
               const SizedBox(width: 6),
               Icon(Icons.lock, size: 16, color: Colors.green[200]),
             ],
