@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:olm/olm.dart' as olm;
 import 'notification_service.dart';
 
 /// Сервис управления Matrix клиентом
@@ -46,11 +47,29 @@ class MatrixService {
     );
 
     // Инициализация клиента — запускает синхронизацию если уже залогинен
-    await _client.init();
+    try {
+      await _client.init();
+    } catch (e) {
+      debugPrint('[Matrix] Client.init() error: $e');
+    }
     _cachedUserId = _client.userID;
     debugPrint('[Matrix] After init: userID = $_cachedUserId');
     debugPrint('[Matrix] Encryption enabled: ${_client.encryptionEnabled}');
     debugPrint('[Matrix] Encryption object: ${_client.encryption != null ? "present" : "NULL"}');
+
+    // Дополнительная диагностика E2EE на веб
+    if (kIsWeb && !_client.encryptionEnabled) {
+      debugPrint('[Matrix] WEB: E2EE is NOT working. olm.js may not be loaded correctly.');
+      debugPrint('[Matrix] WEB: Check that web/olm.js exists and is loaded in index.html');
+      // Пробуем инициализировать Olm вручную чтобы увидеть ошибку
+      try {
+        await olm.init();
+        debugPrint('[Matrix] WEB: olm.init() succeeded manually! But Client.init() failed to use it.');
+      } catch (e2) {
+        debugPrint('[Matrix] WEB: olm.init() failed: $e2');
+      }
+    }
+
     if (_client.encryptionEnabled) {
       debugPrint('[Matrix] Identity key: ${_client.identityKey}');
       debugPrint('[Matrix] Fingerprint key: ${_client.fingerprintKey}');
@@ -88,15 +107,15 @@ class MatrixService {
         if (timelineEvents == null || timelineEvents.isEmpty) continue;
 
         for (final matrixEvent in timelineEvents) {
-          // MatrixEvent имеет свойства type, senderId, content
           final eventType = matrixEvent.type;
           final senderId = matrixEvent.senderId;
 
           // Пропускаем свои же сообщения
           if (senderId == _client.userID) continue;
 
-          // Только сообщения
-          if (eventType != 'm.room.message') continue;
+          // Обычные сообщения и зашифрованные сообщения
+          // В зашифрованных комнатах сообщения приходят как m.room.encrypted
+          if (eventType != 'm.room.message' && eventType != 'm.room.encrypted') continue;
 
           // Не показываем уведомление если мы сейчас в этом чате
           if (_currentRoomId == roomId) continue;
@@ -105,28 +124,9 @@ class MatrixService {
           final room = _client.getRoomById(roomId);
           if (room == null) continue;
 
-          // Извлекаем текст сообщения из content
-          final content = matrixEvent.content;
-          final msgtype = content['msgtype'] as String? ?? '';
-          final body = content['body'] as String? ?? '';
-
-          String messageText;
-          if (msgtype == 'm.image') {
-            messageText = '📷 Фото';
-          } else if (msgtype == 'm.file') {
-            messageText = '📎 Файл';
-          } else if (msgtype == 'm.audio') {
-            messageText = '🎵 Аудио';
-          } else if (msgtype == 'm.video') {
-            messageText = '🎬 Видео';
-          } else {
-            messageText = body.isNotEmpty ? body : 'Новое сообщение';
-          }
-
           // Имя отправителя — из участников комнаты
           String senderName = senderId?.localpart ?? 'Неизвестный';
           try {
-            // Пробуем получить displayname из состояния комнаты
             final memberEvent = room.getState('m.room.member', senderId);
             if (memberEvent != null) {
               final displayName = memberEvent.content['displayname'] as String?;
@@ -136,7 +136,32 @@ class MatrixService {
             }
           } catch (_) {}
 
-          debugPrint('[NOTIFY] New message in $roomId from $senderName: $messageText');
+          String messageText;
+
+          if (eventType == 'm.room.encrypted') {
+            // Зашифрованное сообщение — показываем общее уведомление
+            // Расшифровка произойдёт позже когда SDK обработает событие
+            messageText = '🔐 Зашифрованное сообщение';
+            debugPrint('[NOTIFY] Encrypted message in $roomId from $senderName');
+          } else {
+            // Обычное сообщение — извлекаем текст
+            final content = matrixEvent.content;
+            final msgtype = content['msgtype'] as String? ?? '';
+            final body = content['body'] as String? ?? '';
+
+            if (msgtype == 'm.image') {
+              messageText = '📷 Фото';
+            } else if (msgtype == 'm.file') {
+              messageText = '📎 Файл';
+            } else if (msgtype == 'm.audio') {
+              messageText = '🎵 Аудио';
+            } else if (msgtype == 'm.video') {
+              messageText = '🎬 Видео';
+            } else {
+              messageText = body.isNotEmpty ? body : 'Новое сообщение';
+            }
+            debugPrint('[NOTIFY] New message in $roomId from $senderName: $messageText');
+          }
 
           // Показываем уведомление
           NotificationService.instance.showMessageNotification(
