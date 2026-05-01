@@ -4,6 +4,7 @@ import 'package:matrix/matrix.dart';
 import '../services/matrix_service.dart';
 import 'chat_room_screen.dart';
 import 'login_screen.dart';
+import 'profile_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
   final MatrixService matrixService;
@@ -147,14 +148,15 @@ class _ChatsScreenState extends State<ChatsScreen> {
         title: const Text("Мессенджер", style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
           IconButton(
-            icon: _isLoggingOut
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.exit_to_app),
-            onPressed: _isLoggingOut ? null : _logout,
+            icon: const Icon(Icons.person),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ProfileScreen(matrixService: widget.matrixService),
+                ),
+              ).then((_) => _loadRooms()); // Обновить список после возврата
+            },
           ),
         ],
       ),
