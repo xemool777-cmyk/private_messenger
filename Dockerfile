@@ -1,7 +1,22 @@
 # ============================================
 # Stage 1: Build Flutter web
 # ============================================
-FROM cirrusci/flutter:stable AS builder
+FROM ubuntu:22.04 AS builder
+
+# Устанавливаем зависимости
+RUN apt-get update && apt-get install -y \
+    curl git unzip xz-utils zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем Flutter 3.24.5 (Dart 3.5+ — соответствует SDK >=3.2.0)
+ENV FLUTTER_VERSION=3.24.5
+RUN git clone https://github.com/flutter/flutter.git -b ${FLUTTER_VERSION} --depth 1 /sdks/flutter
+ENV PATH="/sdks/flutter/bin:/sdks/flutter/bin/cache/dart-sdk/bin:${PATH}"
+
+# Преднастраиваем Flutter (принимаем лицензии, скачиваем SDK)
+RUN flutter config --no-analytics \
+    && flutter precache --web \
+    && flutter doctor
 
 WORKDIR /app
 
