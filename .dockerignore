@@ -31,5 +31,5 @@ test/
 *.md
 !README.md
 
-# Deploy configs (copied separately in Dockerfile)
-deploy/
+# Deploy configs are needed by Dockerfile (nginx.conf, entrypoint.sh)
+# Do NOT exclude deploy/ here!
