@@ -89,9 +89,9 @@ class _LoginPageState extends State<LoginPage> {
           children: [
             const Icon(Icons.lock_outline, size: 60, color: Colors.indigo),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               "Ваш сервер: ${MatrixService.serverName}",
-              style: TextStyle(color: Colors.grey),
+              style: const TextStyle(color: Colors.grey),
             ),
             const SizedBox(height: 30),
             TextField(
