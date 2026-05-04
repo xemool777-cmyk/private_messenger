@@ -30,31 +30,32 @@ class _E2EEInfoDialogState extends State<E2EEInfoDialog> {
 
   Future<void> _loadDeviceInfo() async {
     final client = widget.matrixService.client;
-    
+
     try {
       // Получаем список устройств участников комнаты
       final memberKeys = <DeviceKeysInfo>[];
-      
-      for (final memberId in widget.room.getParticipants()) {
+
+      for (final member in widget.room.getParticipants()) {
         try {
-          final keys = await client.getUserDeviceKeys(memberId);
-          if (keys != null) {
-            for (final device in keys.deviceKeys) {
+          // matrix SDK 0.22.x: используем client.userDeviceKeys[userId]
+          final keysList = client.userDeviceKeys[member.id];
+          if (keysList != null) {
+            for (final device in keysList.deviceKeys.values) {
               memberKeys.add(DeviceKeysInfo(
-                userId: memberId,
-                deviceId: device.deviceId,
+                userId: member.id,
+                deviceId: device.deviceId ?? 'unknown',
                 fingerprintKey: device.ed25519Key,
                 identityKey: device.curve25519Key,
                 isVerified: device.verified,
-                displayName: device.deviceDisplayName ?? device.deviceId,
+                displayName: device.deviceDisplayName ?? device.deviceId ?? 'Unknown',
               ));
             }
           }
         } catch (e) {
-          debugPrint('[E2EE] Error loading keys for $memberId: $e');
+          debugPrint('[E2EE] Error loading keys for ${member.id}: $e');
         }
       }
-      
+
       if (mounted) {
         setState(() {
           _devices = memberKeys;
@@ -71,7 +72,7 @@ class _E2EEInfoDialogState extends State<E2EEInfoDialog> {
     }
   }
 
-  /// Экспорт ключей комнаты
+  /// Экспорт ключей комнаты (полный дамп базы данных)
   Future<void> _exportKeys() async {
     try {
       final client = widget.matrixService.client;
@@ -81,11 +82,11 @@ class _E2EEInfoDialogState extends State<E2EEInfoDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Экспорт ключей...")),
       );
-      
-      // Получаем ключи Megolm сессий
-      final export = await encryption.keyManager.export();
-      
-      if (export.isEmpty) {
+
+      // Matrix SDK 0.22.x: используем client.exportDump()
+      final dump = await client.exportDump();
+
+      if (dump == null || dump.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -96,10 +97,7 @@ class _E2EEInfoDialogState extends State<E2EEInfoDialog> {
         }
         return;
       }
-      
-      // Конвертируем в JSON строку
-      final jsonStr = export.map((e) => e.toJson()).toList();
-      
+
       if (mounted) {
         // Показываем диалог с ключами
         showDialog(
@@ -107,9 +105,29 @@ class _E2EEInfoDialogState extends State<E2EEInfoDialog> {
           builder: (context) => AlertDialog(
             title: const Text("Экспорт ключей"),
             content: SingleChildScrollView(
-              child: SelectableText(
-                jsonStr.toString(),
-                style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Полный дамп базы данных шифрования. "
+                    "Сохраните этот текст в безопасном месте — "
+                    "он содержит все ключи для расшифровки сообщений.",
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 300),
+                    child: Scrollbar(
+                      child: SingleChildScrollView(
+                        child: SelectableText(
+                          dump,
+                          style: const TextStyle(fontSize: 9, fontFamily: 'monospace'),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             actions: [
@@ -139,15 +157,11 @@ class _E2EEInfoDialogState extends State<E2EEInfoDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Запрос ключей...")),
       );
-      
-      // Запрашиваем ключи через API
-      final client = widget.matrixService.client;
-      await client.claimKeys();
-      
-      // Также перезапрашиваем через room
+
+      // Перезапрашиваем через room timeline
       final timeline = await widget.room.getTimeline();
       timeline.requestKeys();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -208,13 +222,13 @@ class _E2EEInfoDialogState extends State<E2EEInfoDialog> {
                     // Статус шифрования
                     _buildStatusCard(isEncrypted, client),
                     const SizedBox(height: 16),
-                    
+
                     // Ключи текущего устройства
                     if (encryption != null && client.encryptionEnabled) ...[
                       _buildKeyInfoCard(client),
                       const SizedBox(height: 16),
                     ],
-                    
+
                     // Список устройств
                     if (_devices.isNotEmpty) ...[
                       Text(
@@ -224,7 +238,7 @@ class _E2EEInfoDialogState extends State<E2EEInfoDialog> {
                       const SizedBox(height: 8),
                       ..._devices.map((d) => _buildDeviceCard(d)),
                     ],
-                    
+
                     // Ошибка
                     if (_error != null) ...[
                       const SizedBox(height: 8),

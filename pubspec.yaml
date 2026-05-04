@@ -23,6 +23,7 @@ dependencies:
   
   # Утилиты
   path_provider: ^2.1.1
+  path: ^1.9.0
   cupertino_icons: ^1.0.6
   http: ^1.2.0
 
@@ -36,7 +37,8 @@ dependencies:
   audioplayers: ^5.2.1
 
   # Видеозвонки (WebRTC)
-  flutter_webrtc: ^0.9.48
+  # Версия ^0.10.0 мигрировала на dart:js_interop, исправляет JSArray ошибки на Dart 3.2+
+  flutter_webrtc: ^0.10.0
 
   # Уведомления
   flutter_local_notifications: ^17.0.0

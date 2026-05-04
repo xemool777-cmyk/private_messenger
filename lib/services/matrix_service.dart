@@ -360,43 +360,38 @@ class MatrixService {
     return '@$username:$serverName';
   }
 
-  /// Экспорт ключей шифрования (для резервного копирования)
+  /// Экспорт ключей шифрования (полный дамп базы данных)
+  /// Matrix SDK 0.22.x не поддерживает экспорт Megolm-ключей в формате Element.
+  /// Используем полный дамп базы данных как альтернативу.
   Future<String?> exportEncryptionKeys(String passphrase) async {
     if (!_client.encryptionEnabled || _client.encryption == null) return null;
 
     try {
-      final export = await _client.encryption!.keyManager.export();
-      if (export.isEmpty) return null;
-
-      final jsonList = export.map((e) => e.toJson()).toList();
-      return jsonEncode(jsonList);
+      final dump = await _client.exportDump();
+      if (dump == null || dump.isEmpty) return null;
+      debugPrint('[E2EE] Database dump exported (${dump.length} chars)');
+      return dump;
     } catch (e) {
       debugPrint('[E2EE] Key export error: $e');
       return null;
     }
   }
 
-  /// Импорт ключей шифрования (для восстановления на новом устройстве)
+  /// Импорт ключей шифрования (восстановление из дампа базы данных)
+  /// Matrix SDK 0.22.x не поддерживает импорт ключей в формате Element.
+  /// Используем импорт полного дампа базы данных.
   Future<int> importEncryptionKeys(String jsonData, String passphrase) async {
     if (!_client.encryptionEnabled || _client.encryption == null) return 0;
 
     try {
-      final jsonList = jsonDecode(jsonData) as List;
-      final keys = jsonList.map((e) => Map<String, dynamic>.from(e)).toList();
-
-      int imported = 0;
-      for (final keyData in keys) {
-        try {
-          await _client.encryption!.keyManager.importKeys(
-            [keyData],
-            passphrase,
-          );
-          imported++;
-        } catch (_) {}
+      final success = await _client.importDump(jsonData);
+      if (success) {
+        debugPrint('[E2EE] Database dump imported successfully');
+        return 1;
+      } else {
+        debugPrint('[E2EE] Database dump import failed');
+        return 0;
       }
-
-      debugPrint('[E2EE] Imported $imported keys');
-      return imported;
     } catch (e) {
       debugPrint('[E2EE] Key import error: $e');
       return 0;
@@ -406,27 +401,26 @@ class MatrixService {
   /// Получить список устройств текущего пользователя
   Future<List<DeviceKeys>> getMyDevices() async {
     try {
-      final keys = await _client.getUserDeviceKeys(_client.userID!);
-      if (keys == null) return [];
-      return keys.deviceKeys.toList();
+      final userId = _client.userID;
+      if (userId == null) return [];
+      final keysList = _client.userDeviceKeys[userId];
+      if (keysList == null) return [];
+      return keysList.deviceKeys.values.toList();
     } catch (e) {
       debugPrint('[E2EE] Get devices error: $e');
       return [];
     }
   }
 
-  /// Верификация устройства по emoji
+  /// Верификация устройства
   Future<bool> verifyDevice(String userId, String deviceId) async {
     try {
-      final keys = await _client.getUserDeviceKeys(userId);
-      if (keys == null) return false;
+      final keysList = _client.userDeviceKeys[userId];
+      if (keysList == null) return false;
 
-      final device = keys.deviceKeys.firstWhere(
-        (d) => d.deviceId == deviceId,
-        orElse: () => throw Exception('Device not found'),
-      );
+      final device = keysList.deviceKeys[deviceId];
+      if (device == null) return false;
 
-      // Помечаем устройство как проверенное
       await device.setVerified(true);
       debugPrint('[E2EE] Device $deviceId verified for $userId');
       return true;
@@ -439,13 +433,11 @@ class MatrixService {
   /// Отозвать верификацию устройства
   Future<bool> unverifyDevice(String userId, String deviceId) async {
     try {
-      final keys = await _client.getUserDeviceKeys(userId);
-      if (keys == null) return false;
+      final keysList = _client.userDeviceKeys[userId];
+      if (keysList == null) return false;
 
-      final device = keys.deviceKeys.firstWhere(
-        (d) => d.deviceId == deviceId,
-        orElse: () => throw Exception('Device not found'),
-      );
+      final device = keysList.deviceKeys[deviceId];
+      if (device == null) return false;
 
       await device.setVerified(false);
       debugPrint('[E2EE] Device $deviceId unverified for $userId');
@@ -459,13 +451,11 @@ class MatrixService {
   /// Черный список устройства (заблокировать)
   Future<bool> blockDevice(String userId, String deviceId) async {
     try {
-      final keys = await _client.getUserDeviceKeys(userId);
-      if (keys == null) return false;
+      final keysList = _client.userDeviceKeys[userId];
+      if (keysList == null) return false;
 
-      final device = keys.deviceKeys.firstWhere(
-        (d) => d.deviceId == deviceId,
-        orElse: () => throw Exception('Device not found'),
-      );
+      final device = keysList.deviceKeys[deviceId];
+      if (device == null) return false;
 
       await device.setBlocked(true);
       debugPrint('[E2EE] Device $deviceId blocked for $userId');

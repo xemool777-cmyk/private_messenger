@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import '../services/matrix_service.dart';
 import '../services/notification_service.dart';
 import '../services/call_service.dart';
@@ -320,31 +323,39 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     try {
       // Проверяем разрешение на микрофон
       if (await _audioRecorder.hasPermission()) {
-        final path = await _audioRecorder.start(
+        // record v5: start() требует path и возвращает Future<void>
+        // На веб path игнорируется, но параметр обязателен
+        final audioPath = kIsWeb
+            ? ''
+            : p.join(
+                (await getTemporaryDirectory()).path,
+                'recording_${DateTime.now().millisecondsSinceEpoch}.opus',
+              );
+
+        await _audioRecorder.start(
           const RecordConfig(
             encoder: AudioEncoder.opus,
             bitRate: 64000,
             sampleRate: 48000,
             numChannels: 1,
           ),
+          path: audioPath,
         );
-        
-        if (path != null) {
-          setState(() {
-            _isRecording = true;
-            _recordingDuration = Duration.zero;
-            _recordingPath = path;
-          });
-          
-          // Таймер для отображения длительности записи
-          _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-            if (mounted) {
-              setState(() {
-                _recordingDuration += const Duration(seconds: 1);
-              });
-            }
-          });
-        }
+
+        setState(() {
+          _isRecording = true;
+          _recordingDuration = Duration.zero;
+          _recordingPath = audioPath;
+        });
+
+        // Таймер для отображения длительности записи
+        _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+          if (mounted) {
+            setState(() {
+              _recordingDuration += const Duration(seconds: 1);
+            });
+          }
+        });
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

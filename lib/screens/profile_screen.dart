@@ -312,17 +312,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      device.deviceDisplayName ?? device.deviceId,
+                                      device.deviceDisplayName ?? device.deviceId ?? 'Unknown',
                                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
                                     ),
                                     Text(
-                                      device.deviceId,
+                                      device.deviceId ?? '',
                                       style: TextStyle(fontSize: 10, color: Colors.grey[500], fontFamily: 'monospace'),
                                     ),
                                   ],
                                 ),
                               ),
-                              if (device.deviceId == client.deviceID)
+                              if (device.deviceId != null && device.deviceId == client.deviceID)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
