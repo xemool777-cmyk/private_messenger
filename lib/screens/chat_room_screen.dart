@@ -6,8 +6,13 @@ import 'package:matrix/matrix.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:record/record.dart';
 import '../services/matrix_service.dart';
 import '../services/notification_service.dart';
+import '../services/call_service.dart';
+import '../screens/call_screen.dart';
+import '../widgets/audio_player_widget.dart';
+import '../widgets/e2ee_info_dialog.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final MatrixService matrixService;
@@ -33,6 +38,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final Map<String, Uint8List> _imageCache = {};
   // Кэш Future чтобы не дублировать загрузки
   final Map<String, Future<MatrixFile?>> _imageLoadFutures = {};
+  // Кэш загруженных аудио (eventId → байты)
+  final Map<String, Uint8List> _audioCache = {};
+  final Map<String, Future<Uint8List?>> _audioLoadFutures = {};
+
+  // Запись голосовых сообщений
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  bool _isRecording = false;
+  Duration _recordingDuration = Duration.zero;
+  Timer? _recordingTimer;
+  String? _recordingPath;
+
+  // Звонки
+  CallService? _callService;
 
   @override
   void initState() {
@@ -43,6 +61,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     NotificationService.instance.cancelNotification(widget.room.id);
 
     _initTimeline();
+    _initCallService();
 
     // Слушаем обновления комнаты — просто обновляем UI, НЕ пересоздаём таймлайн!
     _roomUpdateSub = widget.room.onUpdate.stream.listen((_) {
@@ -56,6 +75,25 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     });
   }
 
+  void _initCallService() {
+    _callService = CallService(widget.matrixService.client);
+    _callService!.onIncomingCall = () {
+      if (!mounted) return;
+      final session = _callService!.activeCall;
+      if (session != null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CallScreen(
+              callSession: session,
+              callService: _callService!,
+            ),
+          ),
+        );
+      }
+    };
+  }
+
   @override
   void dispose() {
     // Помечаем что мы вышли из чата
@@ -63,6 +101,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _roomUpdateSub?.cancel();
     _keyReceivedSub?.cancel();
     _scrollController.dispose();
+    _recordingTimer?.cancel();
+    _audioRecorder.dispose();
+    _callService?.dispose();
     super.dispose();
   }
 
@@ -88,7 +129,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       }
 
       // Если комната зашифрована — запрашиваем ключи для нерасшифрованных событий
-      // Это нужно когда входим с нового устройства (ключей нет)
       final isEncrypted = widget.room.getState('m.room.encryption') != null;
       if (isEncrypted && _timeline != null) {
         final undecrypted = _timeline!.events.where(
@@ -99,7 +139,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           try {
             _timeline!.requestKeys();
             debugPrint('[E2EE] Key request sent');
-            // После запроса ключей — обновляем UI (ключи могут прийти позже)
             if (mounted) setState(() {});
           } catch (e) {
             debugPrint('[E2EE] Key request failed: $e');
@@ -122,13 +161,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       final countBefore = _timeline!.events.length;
       await _timeline!.requestHistory();
       final countAfter = _timeline!.events.length;
-      // Если количество событий не изменилось — история кончилась
       if (countAfter == countBefore) {
         _canLoadMoreHistory = false;
       }
     } catch (e) {
       debugPrint("History request error: $e");
-      // Если метод не поддерживается — не критично
     }
   }
 
@@ -180,7 +217,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
     try {
       await widget.room.sendTextEvent(text);
-      // Таймлайн обновится автоматически через room.onUpdate
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -278,6 +314,211 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
+  // ===================== ГОЛОСОВЫЕ СООБЩЕНИЯ =====================
+
+  Future<void> _startRecording() async {
+    try {
+      // Проверяем разрешение на микрофон
+      if (await _audioRecorder.hasPermission()) {
+        final path = await _audioRecorder.start(
+          const RecordConfig(
+            encoder: AudioEncoder.opus,
+            bitRate: 64000,
+            sampleRate: 48000,
+            numChannels: 1,
+          ),
+        );
+        
+        if (path != null) {
+          setState(() {
+            _isRecording = true;
+            _recordingDuration = Duration.zero;
+            _recordingPath = path;
+          });
+          
+          // Таймер для отображения длительности записи
+          _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+            if (mounted) {
+              setState(() {
+                _recordingDuration += const Duration(seconds: 1);
+              });
+            }
+          });
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Нет доступа к микрофону"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('[AUDIO] Recording start error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Ошибка записи: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _stopAndSendRecording() async {
+    _recordingTimer?.cancel();
+    
+    try {
+      final path = await _audioRecorder.stop();
+      if (path == null) {
+        setState(() { _isRecording = false; });
+        return;
+      }
+
+      setState(() { _isSending = true; _isRecording = false; });
+
+      // Читаем записанный файл
+      final file = http.Client();
+      // Для отправки используем MatrixAudioFile
+      // На веб path = URL blob, на нативе — путь к файлу
+      // Используем универсальный способ через MatrixFile
+      final bytes = await _readRecordingBytes(path);
+      if (bytes == null || bytes.isEmpty) {
+        if (mounted) setState(() { _isSending = false; });
+        return;
+      }
+
+      final matrixFile = MatrixAudioFile(
+        bytes: bytes,
+        name: 'voice_message.ogg',
+        mimeType: 'audio/ogg',
+      );
+
+      await widget.room.sendFileEvent(matrixFile);
+      debugPrint('[AUDIO] Voice message sent (${bytes.length} bytes)');
+    } catch (e) {
+      debugPrint('[AUDIO] Send voice error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Ошибка отправки голосового: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() { _isSending = false; });
+    }
+  }
+
+  void _cancelRecording() {
+    _recordingTimer?.cancel();
+    _audioRecorder.stop(); // Отменяем запись без отправки
+    setState(() {
+      _isRecording = false;
+      _recordingDuration = Duration.zero;
+    });
+  }
+
+  /// Чтение байтов записи (разные реализации для web/native)
+  Future<Uint8List?> _readRecordingBytes(String path) async {
+    try {
+      // На веб record возвращает blob URL, используем XFile
+      // На нативе — путь к файлу
+      final xFile = XFile(path);
+      final bytes = await xFile.readAsBytes();
+      return Uint8List.fromList(bytes);
+    } catch (e) {
+      debugPrint('[AUDIO] Read bytes error: $e');
+      return null;
+    }
+  }
+
+  // ===================== ВИДЕОЗВОНКИ =====================
+
+  Future<void> _startVideoCall() async {
+    if (_callService == null) return;
+    
+    try {
+      final session = await _callService!.startCall(
+        widget.room.id,
+        video: true,
+      );
+      
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CallScreen(
+              callSession: session,
+              callService: _callService!,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[CALL] Start call error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Ошибка звонка: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _startAudioCall() async {
+    if (_callService == null) return;
+    
+    try {
+      final session = await _callService!.startCall(
+        widget.room.id,
+        video: false,
+      );
+      
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CallScreen(
+              callSession: session,
+              callService: _callService!,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[CALL] Start audio call error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Ошибка звонка: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // ===================== E2EE ИНФО =====================
+
+  void _showE2EEInfo() {
+    showDialog(
+      context: context,
+      builder: (_) => E2EEInfoDialog(
+        matrixService: widget.matrixService,
+        room: widget.room,
+      ),
+    );
+  }
+
+  // ===================== УТИЛИТЫ =====================
+
   String? _getMimeType(String name, String? extension) {
     final ext = (extension ?? name.split('.').last).toLowerCase();
     const mimeMap = {
@@ -290,6 +531,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       'zip': 'application/zip',
       'mp3': 'audio/mpeg',
       'mp4': 'video/mp4',
+      'ogg': 'audio/ogg',
+      'oga': 'audio/ogg',
+      'opus': 'audio/opus',
+      'wav': 'audio/wav',
+      'm4a': 'audio/mp4',
+      'webm': 'audio/webm',
     };
     return mimeMap[ext];
   }
@@ -375,6 +622,31 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                // Вторая строка — звонки
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _attachOption(
+                      icon: Icons.videocam,
+                      label: "Видеозвонок",
+                      color: Colors.teal,
+                      onTap: () {
+                        Navigator.pop(context);
+                        _startVideoCall();
+                      },
+                    ),
+                    _attachOption(
+                      icon: Icons.phone,
+                      label: "Аудиозвонок",
+                      color: Colors.green,
+                      onTap: () {
+                        Navigator.pop(context);
+                        _startAudioCall();
+                      },
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -435,6 +707,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     return "${(bytes / (1024 * 1024)).toStringAsFixed(1)} МБ";
   }
 
+  String _formatDuration(Duration d) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = twoDigits(d.inMinutes.remainder(60));
+    final seconds = twoDigits(d.inSeconds.remainder(60));
+    return '$minutes:$seconds';
+  }
+
   IconData _fileIcon(String? mimeType) {
     if (mimeType == null) return Icons.insert_drive_file;
     if (mimeType.startsWith('application/pdf')) return Icons.picture_as_pdf;
@@ -483,6 +762,38 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               fontSize: 11,
             ),
           ),
+          const SizedBox(height: 6),
+          // Кнопка перезапроса ключей
+          if (canRequest)
+            OutlinedButton.icon(
+              onPressed: () {
+                try {
+                  event.requestKey();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Ключи запрошены повторно"),
+                      backgroundColor: Colors.blue,
+                    ),
+                  );
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text("Ошибка: $e"),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              icon: Icon(Icons.refresh, size: 14, color: isMe ? Colors.white70 : Colors.orange),
+              label: Text(
+                "Запросить ключи",
+                style: TextStyle(color: isMe ? Colors.white70 : Colors.orange, fontSize: 12),
+              ),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                minimumSize: Size.zero,
+              ),
+            ),
         ],
       );
     }
@@ -514,14 +825,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       );
     }
 
-    // --- Видео ---
-    if (msgType == MessageTypes.Video) {
-      return _buildFileCard(event, isMe, Icons.video_file, Colors.red);
+    // --- Аудио (инлайн плеер) ---
+    if (msgType == MessageTypes.Audio) {
+      return _buildAudioMessage(event, isMe);
     }
 
-    // --- Аудио ---
-    if (msgType == MessageTypes.Audio) {
-      return _buildFileCard(event, isMe, Icons.audio_file, Colors.orange);
+    // --- Видео ---
+    if (msgType == MessageTypes.Video) {
+      return _buildVideoMessage(event, isMe);
     }
 
     // --- Файл ---
@@ -535,6 +846,228 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       style: TextStyle(
         color: isMe ? Colors.white : Colors.black87,
         fontSize: 16,
+      ),
+    );
+  }
+
+  // ===================== АУДИО СООБЩЕНИЕ =====================
+
+  Widget _buildAudioMessage(Event event, bool isMe) {
+    final eventId = event.eventId;
+    final mxcUrl = event.attachmentMxcUrl;
+    final fileInfo = event.content['info'] as Map<String, dynamic>?;
+    final durationMs = fileInfo?['duration'] as int?;
+
+    // Если есть кэш — показываем плеер
+    if (_audioCache.containsKey(eventId)) {
+      return AudioPlayerWidget(
+        audioBytes: _audioCache[eventId],
+        duration: durationMs != null ? Duration(milliseconds: durationMs) : null,
+        isMe: isMe,
+      );
+    }
+
+    // Если нет mxc — показываем файл-карточку
+    if (mxcUrl == null) {
+      return _buildFileCard(event, isMe, Icons.audio_file, Colors.orange);
+    }
+
+    // Загружаем аудио
+    _audioLoadFutures.putIfAbsent(eventId, () => _loadAudioBytes(event));
+
+    return FutureBuilder<Uint8List?>(
+      future: _audioLoadFutures[eventId],
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isMe ? Colors.indigo[300] : Colors.grey[100],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: isMe ? Colors.white : Colors.indigo,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  "Загрузка аудио...",
+                  style: TextStyle(
+                    color: isMe ? Colors.white70 : Colors.grey[600],
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (snapshot.hasData && snapshot.data != null && snapshot.data!.isNotEmpty) {
+          _audioCache[eventId] = snapshot.data!;
+          return AudioPlayerWidget(
+            audioBytes: snapshot.data,
+            duration: durationMs != null ? Duration(milliseconds: durationMs) : null,
+            isMe: isMe,
+          );
+        }
+
+        // Фоллбэк — файл-карточка с кнопкой скачивания
+        return _buildFileCard(event, isMe, Icons.audio_file, Colors.orange);
+      },
+    );
+  }
+
+  Future<Uint8List?> _loadAudioBytes(Event event) async {
+    // Метод 1: MSC3916 authenticated download
+    try {
+      final bytes = await _authenticatedMediaDownload(event);
+      if (bytes != null) return bytes;
+    } catch (_) {}
+
+    // Метод 2: SDK downloadAndDecryptAttachment
+    try {
+      final file = await event.downloadAndDecryptAttachment();
+      return file.bytes;
+    } catch (_) {}
+
+    return null;
+  }
+
+  // ===================== ВИДЕО СООБЩЕНИЕ =====================
+
+  Widget _buildVideoMessage(Event event, bool isMe) {
+    final fileInfo = event.content['info'] as Map<String, dynamic>?;
+    final durationMs = fileInfo?['duration'] as int?;
+    final fileSize = fileInfo?['size'] as int?;
+    final thumbnailInfo = fileInfo?['thumbnail_info'] as Map<String, dynamic>?;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isMe ? Colors.indigo[300] : Colors.grey[100],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Видео-превью с иконкой play
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                width: 200,
+                height: 120,
+                decoration: BoxDecoration(
+                  color: Colors.black26,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Center(
+                  child: Icon(Icons.videocam, color: Colors.white54, size: 40),
+                ),
+              ),
+              // Кнопка play
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.play_arrow, color: Colors.white, size: 28),
+              ),
+              // Длительность
+              if (durationMs != null)
+                Positioned(
+                  bottom: 4,
+                  right: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      _formatDuration(Duration(milliseconds: durationMs)),
+                      style: const TextStyle(color: Colors.white, fontSize: 11),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.video_file, color: isMe ? Colors.white : Colors.red, size: 20),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      event.body ?? "Видео",
+                      style: TextStyle(
+                        color: isMe ? Colors.white : Colors.black87,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (fileSize != null)
+                      Text(
+                        _formatFileSize(fileSize),
+                        style: TextStyle(
+                          color: isMe ? Colors.white70 : Colors.grey[600],
+                          fontSize: 11,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              IconButton(
+                icon: Icon(
+                  Icons.download,
+                  color: isMe ? Colors.white : Colors.indigo,
+                  size: 18,
+                ),
+                onPressed: () async {
+                  try {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Скачивание видео...")),
+                    );
+                    Uint8List? fileBytes;
+                    final mxcUrl = event.attachmentMxcUrl;
+                    if (mxcUrl != null) {
+                      final bytes = await _authenticatedMediaDownload(event);
+                      if (bytes != null) fileBytes = bytes;
+                    }
+                    fileBytes ??= (await event.downloadAndDecryptAttachment()).bytes;
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Скачано: ${_formatFileSize(fileBytes.length)}")),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Ошибка: $e")),
+                      );
+                    }
+                  }
+                },
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -553,15 +1086,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   /// Проверка — похожи ли байты на картинку
   bool _looksLikeImage(Uint8List bytes) {
     if (bytes.length < 4) return false;
-    // JPEG: FF D8 FF
     if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return true;
-    // PNG: 89 50 4E 47
     if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return true;
-    // GIF: 47 49 46
     if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) return true;
-    // WebP: 52 49 46 46 ... 57 45 42 50
     if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46) return true;
-    // BMP: 42 4D
     if (bytes[0] == 0x42 && bytes[1] == 0x4D) return true;
     return false;
   }
@@ -582,12 +1110,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       return _imageErrorWidget(event, "Нет URL");
     }
 
-    // Проверяем кэш
     if (_imageCache.containsKey(eventId)) {
       return _imageFromBytes(_imageCache[eventId]!, event);
     }
 
-    // Запускаем цепочку загрузки (только один раз на событие)
     _imageLoadFutures.putIfAbsent(eventId, () => _loadImageAllMethods(event));
 
     return FutureBuilder<Uint8List?>(
@@ -599,84 +1125,53 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
         if (snapshot.hasData && snapshot.data != null && snapshot.data!.isNotEmpty) {
           final bytes = snapshot.data!;
-          debugPrint("[IMAGE] Got ${bytes.length} bytes, hex: ${_hexDump(bytes)}");
 
           if (_looksLikeImage(bytes)) {
             _imageCache[eventId] = bytes;
             return _imageFromBytes(bytes, event);
           } else {
-            debugPrint("[IMAGE] Bytes don't look like an image! First hex: ${_hexDump(bytes)}");
-            // Если байты не похожи на картинку — показываем диагностику
             return _imageErrorWidget(event, "Не картинка (${bytes.length} байт)");
           }
         }
 
-        debugPrint("[IMAGE] All methods failed for $eventId");
         return _imageErrorWidget(event, "Не удалось загрузить");
       },
     );
   }
 
   /// Загрузка картинки — пробуем методы по очереди
-  /// 
-  /// КЛЮЧЕВОЕ: Conduit включил MSC3916 (authenticated media).
-  /// Старый endpoint /_matrix/media/v3/download/ возвращает M_NOT_FOUND.
-  /// Нужен /_matrix/client/v1/media/download/ с Authorization header!
   Future<MatrixFile?> _loadImageAllMethods(Event event) async {
     final isEncrypted = _isEncryptedMedia(event);
     debugPrint("[IMAGE] Event ${event.eventId}, encrypted=$isEncrypted, mxc=${event.attachmentMxcUrl}");
 
-    // Метод 1: /_matrix/client/v1/media/download/ с Authorization (MSC3916)
-    // Это ПРАВИЛЬНЫЙ endpoint для новых версий Conduit!
+    // Метод 1: MSC3916
     try {
-      debugPrint("[IMAGE] Method 1: client/v1/media/download (MSC3916)");
       final bytes = await _authenticatedMediaDownload(event);
       if (bytes != null && _looksLikeImage(bytes)) {
-        debugPrint("[IMAGE] Method 1 OK: ${bytes.length} bytes ✓");
         return MatrixFile(bytes: bytes, name: event.body ?? 'image');
-      } else if (bytes != null) {
-        debugPrint("[IMAGE] Method 1: got ${bytes.length} bytes but NOT image, hex: ${_hexDump(bytes)}");
       }
-    } catch (e) {
-      debugPrint("[IMAGE] Method 1 FAILED: $e");
-    }
+    } catch (_) {}
 
-    // Метод 2: SDK downloadAndDecryptAttachment (для зашифрованных)
+    // Метод 2: SDK downloadAndDecryptAttachment
     try {
-      debugPrint("[IMAGE] Method 2: SDK downloadAndDecryptAttachment");
       final file = await event.downloadAndDecryptAttachment();
-      debugPrint("[IMAGE] Method 2 OK: ${file.bytes.length} bytes, hex: ${_hexDump(file.bytes)}");
-
       if (_looksLikeImage(file.bytes)) {
-        debugPrint("[IMAGE] Method 2: bytes look like image ✓");
         return file;
-      } else {
-        debugPrint("[IMAGE] Method 2: bytes NOT a valid image, trying next method");
       }
-    } catch (e) {
-      debugPrint("[IMAGE] Method 2 FAILED: $e");
-    }
+    } catch (_) {}
 
-    // Метод 3: Старый media/v3 с токеном в URL (фоллбэк для старых серверов)
+    // Метод 3: Legacy
     try {
-      debugPrint("[IMAGE] Method 3: media/v3 with token in URL");
       final bytes = await _legacyMediaDownload(event);
       if (bytes != null && _looksLikeImage(bytes)) {
-        debugPrint("[IMAGE] Method 3 OK: ${bytes.length} bytes ✓");
         return MatrixFile(bytes: bytes, name: event.body ?? 'image');
-      } else if (bytes != null) {
-        debugPrint("[IMAGE] Method 3: got ${bytes.length} bytes but NOT image, hex: ${_hexDump(bytes)}");
       }
-    } catch (e) {
-      debugPrint("[IMAGE] Method 3 FAILED: $e");
-    }
+    } catch (_) {}
 
-    debugPrint("[IMAGE] ALL METHODS FAILED for ${event.eventId}");
     return null;
   }
 
-  /// ГЛАВНЫЙ МЕТОД: Authenticated Media Download (MSC3916)
-  /// Conduit требует /_matrix/client/v1/media/download/ с Bearer token
+  /// MSC3916 Authenticated Media Download
   Future<Uint8List?> _authenticatedMediaDownload(Event event) async {
     final mxcUrl = event.attachmentMxcUrl;
     final homeserver = widget.matrixService.client.homeserver;
@@ -686,9 +1181,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final serverName = mxcUrl.host;
     final mediaId = mxcUrl.pathSegments.join('/');
 
-    // MSC3916 authenticated media endpoint
     final url = '${homeserver.scheme}://${homeserver.host}/_matrix/client/v1/media/download/$serverName/$mediaId';
-    debugPrint("[IMAGE] MSC3916 URL: $url");
 
     try {
       final response = await http.get(
@@ -697,19 +1190,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       );
 
       if (response.statusCode == 200) {
-        debugPrint("[IMAGE] MSC3916 download OK: ${response.bodyBytes.length} bytes");
         return Uint8List.fromList(response.bodyBytes);
-      } else {
-        debugPrint("[IMAGE] MSC3916 status ${response.statusCode}: ${response.body}");
-        return null;
       }
-    } catch (e) {
-      debugPrint("[IMAGE] MSC3916 error: $e");
-      return null;
-    }
+    } catch (_) {}
+
+    return null;
   }
 
-  /// Фоллбэк: старый media endpoint с токеном в URL
+  /// Фоллбэк: старый media endpoint
   Future<Uint8List?> _legacyMediaDownload(Event event) async {
     final mxcUrl = event.attachmentMxcUrl;
     final homeserver = widget.matrixService.client.homeserver;
@@ -726,26 +1214,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
     for (final url in urls) {
       try {
-        debugPrint("[IMAGE] Legacy: $url");
         final response = await http.get(
           Uri.parse(url),
           headers: {'Authorization': 'Bearer $accessToken'},
         );
 
         if (response.statusCode == 200) {
-          debugPrint("[IMAGE] Legacy OK: ${response.bodyBytes.length} bytes");
           return Uint8List.fromList(response.bodyBytes);
-        } else {
-          debugPrint("[IMAGE] Legacy status ${response.statusCode}");
         }
-      } catch (e) {
-        debugPrint("[IMAGE] Legacy error: $e");
-      }
+      } catch (_) {}
     }
     return null;
   }
 
-  /// Виджет картинки из байтов
   Widget _imageFromBytes(Uint8List bytes, Event event) {
     return ConstrainedBox(
       constraints: BoxConstraints(
@@ -756,14 +1237,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         bytes,
         fit: BoxFit.cover,
         errorBuilder: (_, error, ___) {
-          debugPrint("[IMAGE] Image.memory decode error: $error");
           return _imageErrorWidget(event, "Ошибка декодирования");
         },
       ),
     );
   }
 
-  /// Виджет загрузки картинки
   Widget _imageLoadingWidget() {
     return Container(
       width: 200,
@@ -775,7 +1254,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
-  /// Виджет ошибки загрузки картинки
   Widget _imageErrorWidget(Event event, [String? reason]) {
     return Container(
       width: 200,
@@ -869,7 +1347,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text("Скачивание...")),
                 );
-                // Пробуем MSC3916 endpoint, потом SDK
                 Uint8List? fileBytes;
                 final mxcUrl = event.attachmentMxcUrl;
                 if (mxcUrl != null) {
@@ -902,23 +1379,48 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Widget build(BuildContext context) {
     final client = widget.matrixService.client;
     final events = _timeline?.events ?? [];
+    final isEncrypted = widget.room.getState('m.room.encryption') != null;
 
     return Scaffold(
       appBar: AppBar(
         title: Row(
           children: [
             Flexible(child: Text(widget.room.displayname)),
-            if (widget.room.getState('m.room.encryption') != null) ...[
+            if (isEncrypted) ...[
               const SizedBox(width: 6),
-              Icon(Icons.lock, size: 16, color: Colors.green[200]),
+              GestureDetector(
+                onTap: _showE2EEInfo,
+                child: Icon(Icons.lock, size: 16, color: Colors.green[200]),
+              ),
             ],
           ],
         ),
+        actions: [
+          // Кнопка видеозвонка
+          IconButton(
+            icon: const Icon(Icons.videocam),
+            onPressed: _startVideoCall,
+            tooltip: "Видеозвонок",
+          ),
+          // Кнопка аудиозвонка
+          IconButton(
+            icon: const Icon(Icons.phone),
+            onPressed: _startAudioCall,
+            tooltip: "Аудиозвонок",
+          ),
+          // E2EE инфо
+          if (isEncrypted)
+            IconButton(
+              icon: const Icon(Icons.info_outline),
+              onPressed: _showE2EEInfo,
+              tooltip: "Информация о шифровании",
+            ),
+        ],
       ),
       body: Column(
         children: [
           // Предупреждение если комната не зашифрована
-          if (widget.room.getState('m.room.encryption') == null)
+          if (!isEncrypted)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -937,7 +1439,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               ),
             ),
           // Предупреждение о новом устройстве в зашифрованной комнате
-          if (widget.room.getState('m.room.encryption') != null && _timeline != null && _hasUndecryptedEvents())
+          if (isEncrypted && _timeline != null && _hasUndecryptedEvents())
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -950,7 +1452,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     child: Text(
                       "Некоторые сообщения не удалось расшифровать. "
                       "Ключи запрошены у ваших других устройств. "
-                      "Если ключи не придут — войдите с устройства, где есть доступ к чату.",
+                      "Нажмите 🔒 для подробностей.",
                       style: TextStyle(color: Colors.amber[900], fontSize: 11),
                     ),
                   ),
@@ -981,7 +1483,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                         reverse: true,
                         itemCount: events.length + (_canLoadMoreHistory ? 1 : 0),
                         itemBuilder: (context, index) {
-                          // Индикатор подгрузки истории вверху
                           if (index == events.length) {
                             return const Padding(
                               padding: EdgeInsets.symmetric(vertical: 12),
@@ -1004,7 +1505,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                               events[index + 1].originServerTs.day != event.originServerTs.day;
 
                           final isMedia = event.messageType == MessageTypes.Image ||
-                              event.messageType == MessageTypes.Video;
+                              event.messageType == MessageTypes.Video ||
+                              event.messageType == MessageTypes.Audio;
 
                           return Column(
                             children: [
@@ -1099,59 +1601,128 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       ),
           ),
 
-          // Поле ввода
+          // Поле ввода (или интерфейс записи)
+          _isRecording ? _buildRecordingUI() : _buildInputUI(),
+        ],
+      ),
+    );
+  }
+
+  /// UI записи голосового сообщения
+  Widget _buildRecordingUI() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.red[50],
+        boxShadow: [
+          BoxShadow(color: Colors.grey[300]!, blurRadius: 4, offset: const Offset(0, -1)),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Пульсирующая точка
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+            width: 12,
+            height: 12,
             decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(color: Colors.grey[300]!, blurRadius: 4, offset: const Offset(0, -1)),
-              ],
+              color: Colors.red,
+              shape: BoxShape.circle,
             ),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.attach_file, color: Colors.indigo),
-                  onPressed: _isSending ? null : _showAttachmentMenu,
+          ),
+          const SizedBox(width: 12),
+          // Время записи
+          Text(
+            _formatDuration(_recordingDuration),
+            style: TextStyle(
+              color: Colors.red[700],
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            "Запись...",
+            style: TextStyle(color: Colors.red[400], fontSize: 13),
+          ),
+          const Spacer(),
+          // Кнопка отмены
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.red),
+            onPressed: _cancelRecording,
+            tooltip: "Отменить",
+          ),
+          // Кнопка отправки
+          CircleAvatar(
+            backgroundColor: Colors.red,
+            child: IconButton(
+              icon: const Icon(Icons.send, color: Colors.white, size: 20),
+              onPressed: _stopAndSendRecording,
+              tooltip: "Отправить",
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// UI поля ввода
+  Widget _buildInputUI() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(color: Colors.grey[300]!, blurRadius: 4, offset: const Offset(0, -1)),
+        ],
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.attach_file, color: Colors.indigo),
+            onPressed: _isSending ? null : _showAttachmentMenu,
+          ),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: TextField(
+                controller: _controller,
+                decoration: const InputDecoration(
+                  hintText: "Сообщение...",
+                  border: InputBorder.none,
                 ),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(24),
+                minLines: 1,
+                maxLines: 5,
+                onSubmitted: (_) => _sendMessage(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          // Кнопка микрофона / отправки
+          CircleAvatar(
+            backgroundColor: Colors.indigo,
+            child: _isSending
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
                     ),
-                    child: TextField(
-                      controller: _controller,
-                      decoration: const InputDecoration(
-                        hintText: "Сообщение...",
-                        border: InputBorder.none,
+                  )
+                : _controller.text.trim().isEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.mic, color: Colors.white, size: 22),
+                        onPressed: _startRecording,
+                        tooltip: "Голосовое сообщение",
+                      )
+                    : IconButton(
+                        icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                        onPressed: _sendMessage,
                       ),
-                      minLines: 1,
-                      maxLines: 5,
-                      onSubmitted: (_) => _sendMessage(),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                CircleAvatar(
-                  backgroundColor: Colors.indigo,
-                  child: _isSending
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : IconButton(
-                          icon: const Icon(Icons.send, color: Colors.white, size: 20),
-                          onPressed: _sendMessage,
-                        ),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -1185,9 +1756,7 @@ class _FullScreenImageViewState extends State<_FullScreenImageView> {
     super.dispose();
   }
 
-  /// Скачивание через MSC3916 (как в чате)
   Future<Uint8List?> _downloadImage() async {
-    // Если есть кэш — используем
     if (widget.cachedBytes != null) return widget.cachedBytes!;
 
     final mxcUrl = widget.event.attachmentMxcUrl;
@@ -1197,8 +1766,6 @@ class _FullScreenImageViewState extends State<_FullScreenImageView> {
 
     final serverName = mxcUrl.host;
     final mediaId = mxcUrl.pathSegments.join('/');
-
-    // MSC3916 endpoint
     final url = '${homeserver.scheme}://${homeserver.host}/_matrix/client/v1/media/download/$serverName/$mediaId';
 
     try {
@@ -1206,13 +1773,11 @@ class _FullScreenImageViewState extends State<_FullScreenImageView> {
         Uri.parse(url),
         headers: {'Authorization': 'Bearer $accessToken'},
       );
-
       if (response.statusCode == 200) {
         return Uint8List.fromList(response.bodyBytes);
       }
     } catch (_) {}
 
-    // Фоллбэк: SDK
     try {
       final file = await widget.event.downloadAndDecryptAttachment();
       return file.bytes;

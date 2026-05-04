@@ -30,6 +30,14 @@ dependencies:
   image_picker: ^1.0.7
   file_picker: ^8.0.0
 
+  # Аудио (запись и воспроизведение)
+  record: ^5.1.0
+  just_audio: ^0.9.37
+  audioplayers: ^5.2.1
+
+  # Видеозвонки (WebRTC)
+  flutter_webrtc: ^0.9.48
+
   # Уведомления
   flutter_local_notifications: ^17.0.0
 

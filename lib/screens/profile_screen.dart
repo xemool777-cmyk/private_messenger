@@ -39,7 +39,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final client = widget.matrixService.client;
     _userId = widget.matrixService.userId;
 
-    // Если userID пуст — пробуем синхронизацию чтобы обновить
     if (_userId.isEmpty) {
       debugPrint('[PROFILE] userID is null, trying sync...');
       try {
@@ -68,7 +67,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       debugPrint('[PROFILE] getAvatarUrl failed: $e');
     }
 
-    // Загружаем аватар если есть
     if (_avatarUrl != null) {
       _avatarBytes = await _downloadAvatar(_avatarUrl!);
     }
@@ -76,7 +74,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (mounted) setState(() { _isLoading = false; });
   }
 
-  /// Скачать аватар через MSC3916 endpoint
   Future<Uint8List?> _downloadAvatar(Uri mxcUrl) async {
     final homeserver = widget.matrixService.client.homeserver;
     final accessToken = widget.matrixService.client.accessToken;
@@ -84,7 +81,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     final serverName = mxcUrl.host;
     final mediaId = mxcUrl.pathSegments.join('/');
-
     final url = '${homeserver.scheme}://${homeserver.host}/_matrix/client/v1/media/download/$serverName/$mediaId';
 
     try {
@@ -92,7 +88,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Uri.parse(url),
         headers: {'Authorization': 'Bearer $accessToken'},
       );
-
       if (response.statusCode == 200) {
         return Uint8List.fromList(response.bodyBytes);
       }
@@ -102,7 +97,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return null;
   }
 
-  /// Выбрать новый аватар из галереи
   Future<void> _pickAvatar() async {
     try {
       final picker = ImagePicker();
@@ -125,7 +119,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  /// Сохранить профиль
   Future<void> _saveProfile() async {
     setState(() { _isSaving = true; });
 
@@ -140,7 +133,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final client = widget.matrixService.client;
       bool changed = false;
 
-      // Сохраняем отображаемое имя
       final newName = _nameController.text.trim();
       if (newName.isNotEmpty && newName != _displayName) {
         await client.setDisplayName(_userId, newName);
@@ -148,7 +140,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         changed = true;
       }
 
-      // Сохраняем аватар если выбран новый
       if (_newAvatarBytes != null) {
         final matrixFile = MatrixImageFile(
           bytes: _newAvatarBytes!,
@@ -178,6 +169,202 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } finally {
       if (mounted) setState(() { _isSaving = false; });
     }
+  }
+
+  /// Показать детали E2EE — устройства и ключи
+  Future<void> _showE2EEDetails() async {
+    final client = widget.matrixService.client;
+    
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              client.encryptionEnabled ? Icons.lock : Icons.lock_open,
+              color: client.encryptionEnabled ? Colors.green : Colors.red,
+            ),
+            const SizedBox(width: 8),
+            const Text("Шифрование E2EE"),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Статус
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: client.encryptionEnabled ? Colors.green[50] : Colors.red[50],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        client.encryptionEnabled ? Icons.verified_user : Icons.warning,
+                        color: client.encryptionEnabled ? Colors.green[700] : Colors.red[700],
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          client.encryptionEnabled
+                              ? "Сквозное шифрование активно"
+                              : "Шифрование не включено",
+                          style: TextStyle(
+                            color: client.encryptionEnabled ? Colors.green[700] : Colors.red[700],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Ключи устройства
+                if (client.encryptionEnabled) ...[
+                  const Text(
+                    "Ключи вашего устройства:",
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  ),
+                  const SizedBox(height: 8),
+                  if (client.identityKey != null) ...[
+                    Text("Identity Key (Curve25519):", style: TextStyle(color: Colors.grey[700], fontSize: 11)),
+                    SelectableText(
+                      client.identityKey!,
+                      style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+                  if (client.fingerprintKey != null) ...[
+                    Text("Fingerprint Key (Ed25519):", style: TextStyle(color: Colors.grey[700], fontSize: 11)),
+                    SelectableText(
+                      client.fingerprintKey!,
+                      style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  Text(
+                    "Сравните эти ключи с собеседником для проверки подлинности. "
+                    "Если ключи совпадают — связь защищена от перехвата.",
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
+                // Устройства
+                FutureBuilder<List<DeviceKeys>>(
+                  future: widget.matrixService.getMyDevices(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    
+                    final devices = snapshot.data ?? [];
+                    if (devices.isEmpty) {
+                      return Text(
+                        "Не удалось загрузить список устройств",
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                      );
+                    }
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Ваши устройства (${devices.length}):",
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                        ),
+                        const SizedBox(height: 8),
+                        ...devices.map((device) => Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: device.deviceId == client.deviceID
+                                ? Colors.blue[50]
+                                : Colors.grey[50],
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: device.deviceId == client.deviceID
+                                  ? Colors.blue[200]!
+                                  : Colors.grey[300]!,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                device.deviceId == client.deviceID
+                                    ? Icons.phone_android
+                                    : Icons.devices,
+                                size: 18,
+                                color: device.deviceId == client.deviceID
+                                    ? Colors.blue
+                                    : Colors.grey[600],
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      device.deviceDisplayName ?? device.deviceId,
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                                    ),
+                                    Text(
+                                      device.deviceId,
+                                      style: TextStyle(fontSize: 10, color: Colors.grey[500], fontFamily: 'monospace'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (device.deviceId == client.deviceID)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue[100],
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: const Text(
+                                    "Текущее",
+                                    style: TextStyle(fontSize: 10, color: Colors.blue),
+                                  ),
+                                ),
+                              if (device.verified)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green[100],
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: const Text(
+                                    "Проверено",
+                                    style: TextStyle(fontSize: 10, color: Colors.green),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        )),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text("Закрыть"),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -232,7 +419,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 : _avatarPlaceholder(),
                           ),
                         ),
-                        // Иконка редактирования
                         Positioned(
                           bottom: 4,
                           right: 4,
@@ -334,6 +520,81 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 24),
+
+                  // === E2EE Информация ===
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: client.encryptionEnabled ? Colors.green[50] : Colors.red[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: client.encryptionEnabled ? Colors.green[200]! : Colors.red[200]!,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              client.encryptionEnabled ? Icons.lock : Icons.lock_open,
+                              color: client.encryptionEnabled ? Colors.green[700] : Colors.red[700],
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              client.encryptionEnabled ? "Шифрование активно" : "Шифрование выключено",
+                              style: TextStyle(
+                                color: client.encryptionEnabled ? Colors.green[700] : Colors.red[700],
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (client.encryptionEnabled && client.fingerprintKey != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            "Fingerprint Key:",
+                            style: TextStyle(color: Colors.green[900], fontSize: 11),
+                          ),
+                          SelectableText(
+                            client.fingerprintKey!,
+                            style: TextStyle(
+                              color: Colors.green[900],
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _showE2EEDetails,
+                            icon: Icon(
+                              Icons.vpn_key,
+                              size: 16,
+                              color: client.encryptionEnabled ? Colors.green[700] : Colors.red[700],
+                            ),
+                            label: Text(
+                              "Устройства и ключи",
+                              style: TextStyle(
+                                color: client.encryptionEnabled ? Colors.green[700] : Colors.red[700],
+                              ),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(
+                                color: client.encryptionEnabled ? Colors.green[300]! : Colors.red[300]!,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 32),
 
                   // === Кнопка выхода ===
@@ -358,7 +619,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  /// Извлечь localpart из Matrix ID: @username:server → username
   String _extractLocalpart(String userId) {
     if (userId.startsWith('@') && userId.contains(':')) {
       return userId.substring(1, userId.indexOf(':'));

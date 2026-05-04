@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
@@ -6,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:olm/olm.dart' as olm;
 import 'notification_service.dart';
 import 'app_config.dart';
+import 'call_service.dart';
 
 /// Глобальный флаг: был ли olm инициализирован вручную на веб
 bool _olmPreInitialized = false;
@@ -33,6 +35,10 @@ class MatrixService {
   String? _currentRoomId;
   String? get currentRoomId => _currentRoomId;
   set currentRoomId(String? id) => _currentRoomId = id;
+
+  /// CallService для видеозвонков
+  CallService? _callService;
+  CallService? get callService => _callService;
 
   /// Инициализация: Matrix клиент с Hive базой данных
   Future<void> init() async {
@@ -100,6 +106,9 @@ class MatrixService {
 
     // Инициализируем сервис уведомлений
     await NotificationService.instance.init();
+
+    // Инициализируем CallService
+    _callService = CallService(_client);
 
     // Слушаем входящие сообщения для уведомлений
     _startListeningForNotifications();
@@ -351,8 +360,125 @@ class MatrixService {
     return '@$username:$serverName';
   }
 
+  /// Экспорт ключей шифрования (для резервного копирования)
+  Future<String?> exportEncryptionKeys(String passphrase) async {
+    if (!_client.encryptionEnabled || _client.encryption == null) return null;
+
+    try {
+      final export = await _client.encryption!.keyManager.export();
+      if (export.isEmpty) return null;
+
+      final jsonList = export.map((e) => e.toJson()).toList();
+      return jsonEncode(jsonList);
+    } catch (e) {
+      debugPrint('[E2EE] Key export error: $e');
+      return null;
+    }
+  }
+
+  /// Импорт ключей шифрования (для восстановления на новом устройстве)
+  Future<int> importEncryptionKeys(String jsonData, String passphrase) async {
+    if (!_client.encryptionEnabled || _client.encryption == null) return 0;
+
+    try {
+      final jsonList = jsonDecode(jsonData) as List;
+      final keys = jsonList.map((e) => Map<String, dynamic>.from(e)).toList();
+
+      int imported = 0;
+      for (final keyData in keys) {
+        try {
+          await _client.encryption!.keyManager.importKeys(
+            [keyData],
+            passphrase,
+          );
+          imported++;
+        } catch (_) {}
+      }
+
+      debugPrint('[E2EE] Imported $imported keys');
+      return imported;
+    } catch (e) {
+      debugPrint('[E2EE] Key import error: $e');
+      return 0;
+    }
+  }
+
+  /// Получить список устройств текущего пользователя
+  Future<List<DeviceKeys>> getMyDevices() async {
+    try {
+      final keys = await _client.getUserDeviceKeys(_client.userID!);
+      if (keys == null) return [];
+      return keys.deviceKeys.toList();
+    } catch (e) {
+      debugPrint('[E2EE] Get devices error: $e');
+      return [];
+    }
+  }
+
+  /// Верификация устройства по emoji
+  Future<bool> verifyDevice(String userId, String deviceId) async {
+    try {
+      final keys = await _client.getUserDeviceKeys(userId);
+      if (keys == null) return false;
+
+      final device = keys.deviceKeys.firstWhere(
+        (d) => d.deviceId == deviceId,
+        orElse: () => throw Exception('Device not found'),
+      );
+
+      // Помечаем устройство как проверенное
+      await device.setVerified(true);
+      debugPrint('[E2EE] Device $deviceId verified for $userId');
+      return true;
+    } catch (e) {
+      debugPrint('[E2EE] Verify device error: $e');
+      return false;
+    }
+  }
+
+  /// Отозвать верификацию устройства
+  Future<bool> unverifyDevice(String userId, String deviceId) async {
+    try {
+      final keys = await _client.getUserDeviceKeys(userId);
+      if (keys == null) return false;
+
+      final device = keys.deviceKeys.firstWhere(
+        (d) => d.deviceId == deviceId,
+        orElse: () => throw Exception('Device not found'),
+      );
+
+      await device.setVerified(false);
+      debugPrint('[E2EE] Device $deviceId unverified for $userId');
+      return true;
+    } catch (e) {
+      debugPrint('[E2EE] Unverify device error: $e');
+      return false;
+    }
+  }
+
+  /// Черный список устройства (заблокировать)
+  Future<bool> blockDevice(String userId, String deviceId) async {
+    try {
+      final keys = await _client.getUserDeviceKeys(userId);
+      if (keys == null) return false;
+
+      final device = keys.deviceKeys.firstWhere(
+        (d) => d.deviceId == deviceId,
+        orElse: () => throw Exception('Device not found'),
+      );
+
+      await device.setBlocked(true);
+      debugPrint('[E2EE] Device $deviceId blocked for $userId');
+      return true;
+    } catch (e) {
+      debugPrint('[E2EE] Block device error: $e');
+      return false;
+    }
+  }
+
   void dispose() {
     _syncSub?.cancel();
+    _callService?.dispose();
     NotificationService.instance.dispose();
   }
 }
