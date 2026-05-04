@@ -1,0 +1,11 @@
+# Caddyfile — авто-SSL с Let's Encrypt
+# Раскомментируйте в docker-compose.yml если используете Caddy
+
+app.xemooll.ru {
+    reverse_proxy messenger-web:80
+
+    # Логи
+    log {
+        output stdout
+    }
+}

@@ -5,6 +5,7 @@ import 'package:matrix/matrix.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:olm/olm.dart' as olm;
 import 'notification_service.dart';
+import 'app_config.dart';
 
 /// Глобальный флаг: был ли olm инициализирован вручную на веб
 bool _olmPreInitialized = false;
@@ -12,8 +13,11 @@ bool _olmPreInitialized = false;
 /// Сервис управления Matrix клиентом
 /// Отвечает за инициализацию, логин, регистрацию, синхронизацию, уведомления
 class MatrixService {
-  static const String homeserverUrl = 'https://xemooll.ru';
-  static const String serverName = 'xemooll.ru';
+  /// Homeserver URL — из AppConfig (runtime > --dart-define > дефолт)
+  static String get homeserverUrl => AppConfig.homeserverUrl;
+
+  /// Server name — из AppConfig
+  static String get serverName => AppConfig.serverName;
 
   late final Client _client;
   Client get client => _client;

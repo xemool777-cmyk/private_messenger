@@ -1,0 +1,42 @@
+version: "3.8"
+
+services:
+  # ============================================
+  # Веб-клиент Private Messenger (Flutter web + nginx)
+  # ============================================
+  messenger-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        HOMESERVER_URL: "https://xemooll.ru"
+    container_name: messenger-web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      - HOMESERVER_URL=https://xemooll.ru
+    # Если нужен SSL — используйте reverse-proxy (Caddy/nginx-proxy) или
+    # подключите сети к существующему nginx с сертификатами
+
+  # ============================================
+  # Альтернатива: Caddy с авто-SSL (Let's Encrypt)
+  # Раскомментируйте, если хотите автоматические SSL-сертификаты
+  # ============================================
+  # messenger-caddy:
+  #   image: caddy:alpine
+  #   container_name: messenger-caddy
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./deploy/Caddyfile:/etc/caddy/Caddyfile
+  #     - caddy_data:/data
+  #     - caddy_config:/config
+  #   depends_on:
+  #     - messenger-web
+
+# volumes:
+#   caddy_data:
+#   caddy_config:

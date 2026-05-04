@@ -1,0 +1,35 @@
+# Build artifacts
+build/
+.dart_tool/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Flutter
+.flutter-plugins
+.flutter-plugins-dependencies
+*.lock
+!pubspec.lock
+
+# Platforms we don't need for web build
+android/
+ios/
+linux/
+macos/
+windows/
+
+# Tests
+test/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Deploy configs (copied separately in Dockerfile)
+deploy/
