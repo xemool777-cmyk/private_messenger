@@ -48,5 +48,11 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^3.0.1
 
+# Фикс: record_platform_interface 1.5.0 добавил параметр 'request' в hasPermission(),
+# но record_web 1.1.9 его не поддерживает — это вызывает ошибку компиляции.
+# Пиним к совместимой версии.
+dependency_overrides:
+  record_platform_interface: 1.4.0
+
 flutter:
   uses-material-design: true
