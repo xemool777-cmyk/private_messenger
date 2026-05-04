@@ -64,7 +64,7 @@ Future<void> cancelAllNativeNotifications() async {
 
 String _getNotificationPermission() {
   try {
-    return _jsGetNotificationPermission();
+    return _jsGetNotificationPermission().toDart;
   } catch (_) {
     return 'denied';
   }
