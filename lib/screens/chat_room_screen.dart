@@ -33,7 +33,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _isLoading = true;
   bool _isLoadingHistory = false;
   bool _isSending = false;
-  bool _hasText = false;
   StreamSubscription? _roomUpdateSub;
   StreamSubscription? _keyReceivedSub;
   bool _canLoadMoreHistory = true;
@@ -78,15 +77,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       if (mounted) setState(() {});
     });
 
-    // Слушаем ввод текста — переключаем кнопки микрофон/отправка
-    _controller.addListener(_onTextChanged);
-  }
 
-  void _onTextChanged() {
-    final hasText = _controller.text.trim().isNotEmpty;
-    if (hasText != _hasText) {
-      setState(() { _hasText = hasText; });
-    }
   }
 
   void _initCallService() {
@@ -114,7 +105,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     widget.matrixService.currentRoomId = null;
     _roomUpdateSub?.cancel();
     _keyReceivedSub?.cancel();
-    _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _scrollController.dispose();
     _recordingTimer?.cancel();
@@ -1726,27 +1716,33 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           ),
           const SizedBox(width: 4),
           // Кнопка микрофона / отправки
-          CircleAvatar(
-            backgroundColor: Colors.indigo,
-            child: _isSending
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : !_hasText
-                    ? IconButton(
-                        icon: const Icon(Icons.mic, color: Colors.white, size: 22),
-                        onPressed: _startRecording,
-                        tooltip: "Голосовое сообщение",
+          ValueListenableBuilder<TextEditingController>(
+            valueListenable: _controller,
+            builder: (context, _, __) {
+              final hasText = _controller.text.trim().isNotEmpty;
+              return CircleAvatar(
+                backgroundColor: Colors.indigo,
+                child: _isSending
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
-                    : IconButton(
-                        icon: const Icon(Icons.send, color: Colors.white, size: 20),
-                        onPressed: _sendMessage,
-                      ),
+                    : !hasText
+                        ? IconButton(
+                            icon: const Icon(Icons.mic, color: Colors.white, size: 22),
+                            onPressed: _startRecording,
+                            tooltip: "Голосовое сообщение",
+                          )
+                        : IconButton(
+                            icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                            onPressed: _sendMessage,
+                          ),
+              );
+            },
           ),
         ],
       ),
