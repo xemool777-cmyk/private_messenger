@@ -1716,9 +1716,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           ),
           const SizedBox(width: 4),
           // Кнопка микрофона / отправки
-          ValueListenableBuilder<TextEditingController>(
-            valueListenable: _controller,
-            builder: (context, _, __) {
+          ListenableBuilder(
+            listenable: _controller,
+            builder: (context, _) {
               final hasText = _controller.text.trim().isNotEmpty;
               return CircleAvatar(
                 backgroundColor: Colors.indigo,
