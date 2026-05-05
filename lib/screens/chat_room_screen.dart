@@ -76,6 +76,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       debugPrint('[E2EE] Session key received, updating UI');
       if (mounted) setState(() {});
     });
+
+    // Слушаем ввод текста — переключаем кнопки микрофон/отправка
+    _controller.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   void _initCallService() {
@@ -103,6 +108,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     widget.matrixService.currentRoomId = null;
     _roomUpdateSub?.cancel();
     _keyReceivedSub?.cancel();
+    _controller.dispose();
     _scrollController.dispose();
     _recordingTimer?.cancel();
     _audioRecorder.dispose();

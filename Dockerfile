@@ -21,8 +21,13 @@ RUN flutter config --no-analytics \
 WORKDIR /app
 
 # Кэшируем зависимости
-COPY pubspec.yaml pubspec.lock ./
+COPY pubspec.yaml ./
 RUN flutter pub get
+
+# Если pubspec.lock существует — копируем для детерминистичной сборки
+# Если нет — используем свежеразрешённые зависимости (ок для dev)
+COPY pubspec.lock* ./
+RUN flutter pub get 2>/dev/null || true
 
 # Копируем исходники
 COPY . .
