@@ -1715,34 +1715,33 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ),
           ),
           const SizedBox(width: 4),
-          // Кнопка микрофона / отправки
-          ListenableBuilder(
-            listenable: _controller,
-            builder: (context, _) {
-              final hasText = _controller.text.trim().isNotEmpty;
-              return CircleAvatar(
-                backgroundColor: Colors.indigo,
-                child: _isSending
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : !hasText
-                        ? IconButton(
-                            icon: const Icon(Icons.mic, color: Colors.white, size: 22),
-                            onPressed: _startRecording,
-                            tooltip: "Голосовое сообщение",
-                          )
-                        : IconButton(
-                            icon: const Icon(Icons.send, color: Colors.white, size: 20),
-                            onPressed: _sendMessage,
-                          ),
-              );
-            },
+          // Кнопка микрофона (всегда видна)
+          CircleAvatar(
+            backgroundColor: Colors.indigo,
+            child: _isSending
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.mic, color: Colors.white, size: 22),
+                    onPressed: _startRecording,
+                    tooltip: "Голосовое сообщение",
+                  ),
+          ),
+          const SizedBox(width: 4),
+          // Кнопка отправки (всегда видна)
+          CircleAvatar(
+            backgroundColor: Colors.indigo,
+            child: IconButton(
+              icon: const Icon(Icons.send, color: Colors.white, size: 22),
+              onPressed: _isSending ? null : _sendMessage,
+              tooltip: "Отправить",
+            ),
           ),
         ],
       ),
