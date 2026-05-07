@@ -37,6 +37,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   StreamSubscription? _keyReceivedSub;
   bool _canLoadMoreHistory = true;
 
+  // Ответ на сообщение
+  Event? _replyingTo;
+
   // Кэш загруженных картинок (eventId → байты)
   final Map<String, Uint8List> _imageCache = {};
   // Кэш Future чтобы не дублировать загрузки
@@ -218,11 +221,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final text = _controller.text.trim();
     if (text.isEmpty || _isSending) return;
 
-    setState(() { _isSending = true; });
+    final replyEvent = _replyingTo;
+    setState(() {
+      _isSending = true;
+      _replyingTo = null;
+    });
     _controller.clear();
 
     try {
-      await widget.room.sendTextEvent(text);
+      await widget.room.sendTextEvent(text, inReplyTo: replyEvent);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -235,6 +242,117 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     } finally {
       if (mounted) setState(() { _isSending = false; });
     }
+  }
+
+  // ===================== ПОВТОР ОТПРАВКИ =====================
+
+  Future<void> _retrySend(Event event) async {
+    if (event.status != EventStatus.error) return;\n    try {\n      await widget.room.retrySend(event);\n    } catch (e) {\n      if (mounted) {\n        ScaffoldMessenger.of(context).showSnackBar(\n          SnackBar(\n            content: Text(\"Ошибка повторной отправки: $e\"),\n            backgroundColor: Colors.red,\n          ),\n        );\n      }\n    }\n  }
+
+  /// Извлечь цитируемое сообщение из in_reply_to
+  Event? _getReplyToEvent(Event event) {
+    final relatesTo = event.content['m.relates_to'];
+    if (relatesTo == null) return null;
+    final inReplyTo = relatesTo['m.in_reply_to'];
+    if (inReplyTo == null) return null;
+    final eventId = inReplyTo['event_id'] as String?;
+    if (eventId == null) return null;
+    // Ищем событие в текущем таймлайне
+    return _timeline?.events.cast<Event?>().firstWhere(
+      (e) => e?.eventId == eventId,
+      orElse: () => null,
+    );
+  }
+
+  /// Виджет цитаты (ответа) внутри пузыря сообщения
+  Widget _buildReplyPreview(Event event, bool isMe) {
+    final replyEvent = _getReplyToEvent(event);
+    if (replyEvent == null) return const SizedBox.shrink();
+    final replySender = replyEvent.senderId?.localpart ?? '???';
+    final replyBody = replyEvent.body ?? '';
+    // Обрезаем body от формата Matrix fallback (> ...)
+    final cleanBody = replyBody.contains('\n')
+        ? replyBody.split('\n').last.trim()
+        : replyBody;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: isMe ? Colors.white24 : Colors.black12,
+        borderRadius: BorderRadius.circular(8),
+        border: Border(left: BorderSide(color: isMe ? Colors.white70 : Colors.indigo, width: 3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            replySender,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              color: isMe ? Colors.white : Colors.indigo,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            cleanBody.length > 100 ? '${cleanBody.substring(0, 100)}...' : cleanBody,
+            style: TextStyle(
+              fontSize: 12,
+              color: isMe ? Colors.white70 : Colors.grey[600],
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Виджет превью ответа в поле ввода
+  Widget _buildReplyBar() {
+    if (_replyingTo == null) return const SizedBox.shrink();
+    final replySender = _replyingTo!.senderId?.localpart ?? '???';
+    final replyBody = _replyingTo!.body ?? '';
+    final cleanBody = replyBody.contains('\n')
+        ? replyBody.split('\n').last.trim()
+        : replyBody;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.grey[200],
+        border: Border(top: BorderSide(color: Colors.indigo, width: 2)),
+      ),
+      child: Row(
+        children: [
+          Container(width: 3, height: 36, color: Colors.indigo),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Ответ: $replySender',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.indigo)),
+                const SizedBox(height: 2),
+                Text(
+                  cleanBody.length > 60 ? '${cleanBody.substring(0, 60)}...' : cleanBody,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: () => setState(() { _replyingTo = null; }),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
   }
 
   // ===================== ОТПРАВКА КАРТИНКИ =====================
@@ -855,12 +973,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
 
     // --- Обычный текст ---
-    return Text(
-      event.body ?? "",
-      style: TextStyle(
-        color: isMe ? Colors.white : Colors.black87,
-        fontSize: 16,
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildReplyPreview(event, isMe),
+        Text(
+          event.body ?? "",
+          style: TextStyle(
+            color: isMe ? Colors.white : Colors.black87,
+            fontSize: 16,
+          ),
+        ),
+      ],
     );
   }
 
@@ -1574,35 +1698,46 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                             bottomRight: isMe ? const Radius.circular(0) : const Radius.circular(16),
                                           ),
                                         ),
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            _buildMessageContent(event, isMe),
-                                            const SizedBox(height: 4),
-                                            Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Text(
-                                                  _formatMsgTime(event.originServerTs),
-                                                  style: TextStyle(
-                                                    color: isMe ? Colors.white70 : Colors.grey[500],
-                                                    fontSize: 10,
+                                        child: GestureDetector(
+                                          onLongPress: () {
+                                            setState(() { _replyingTo = event; });
+                                            _controller.focusNode.requestFocus();
+                                          },
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              _buildMessageContent(event, isMe),
+                                              const SizedBox(height: 4),
+                                              Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    _formatMsgTime(event.originServerTs),
+                                                    style: TextStyle(
+                                                      color: isMe ? Colors.white70 : Colors.grey[500],
+                                                      fontSize: 10,
+                                                    ),
                                                   ),
-                                                ),
-                                                if (isMe && event.status != EventStatus.synced) ...[
-                                                  const SizedBox(width: 4),
-                                                  Icon(
-                                                    event.status == EventStatus.error
-                                                        ? Icons.error_outline
-                                                        : Icons.access_time,
-                                                    size: 12,
-                                                    color: isMe ? Colors.white70 : Colors.grey,
-                                                  ),
+                                                  if (isMe) ...[
+                                                    const SizedBox(width: 4),
+                                                    if (event.status == EventStatus.error)
+                                                      GestureDetector(
+                                                        onTap: () => _retrySend(event),
+                                                        child: Icon(Icons.error_outline, size: 14, color: Colors.red[300]),
+                                                      )
+                                                    else if (event.status != EventStatus.synced)
+                                                      const Icon(Icons.access_time, size: 12, color: Colors.white70)
+                                                    else
+                                                      const Icon(Icons.done_all, size: 12, color: Colors.white70),
+                                                  ],
+                                                  if (!isMe && event.status == EventStatus.error)
+                                                    const Icon(Icons.error_outline, size: 12, color: Colors.red[300]),
                                                 ],
-                                              ],
-                                            ),
-                                          ],
+                                              ),
+                                            ],
+                                          ),
                                         ),
+                                      ),
                                       ),
                                     ),
                                     if (isMe) const SizedBox(width: 8),
@@ -1616,7 +1751,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           ),
 
           // Поле ввода (или интерфейс записи)
-          _isRecording ? _buildRecordingUI() : _buildInputUI(),
+          _isRecording
+              ? _buildRecordingUI()
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildReplyBar(),
+                    _buildInputUI(),
+                  ],
+                ),
         ],
       ),
     );
