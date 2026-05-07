@@ -6,7 +6,8 @@ import 'app_config_web.dart' if (dart.library.io) 'app_config_native.dart';
 /// Приоритет конфигурации:
 /// 1. Runtime (web): window.__APP_CONFIG из config.js (генерируется entrypoint.sh)
 /// 2. Compile-time: --dart-define=HOMESERVER_URL=...
-/// 3. Дефолт: https://xemooll.ru
+/// 3. Web дефолт: текущий хост (same-origin через nginx proxy)
+/// 4. Native дефолт: https://xemooll.ru
 class AppConfig {
   /// Homeserver URL с учётом приоритетов
   static String get homeserverUrl {
