@@ -247,7 +247,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   // ===================== ПОВТОР ОТПРАВКИ =====================
 
   Future<void> _retrySend(Event event) async {
-    if (event.status != EventStatus.error) return;\n    try {\n      await widget.room.retrySend(event);\n    } catch (e) {\n      if (mounted) {\n        ScaffoldMessenger.of(context).showSnackBar(\n          SnackBar(\n            content: Text(\"Ошибка повторной отправки: $e\"),\n            backgroundColor: Colors.red,\n          ),\n        );\n      }\n    }\n  }
+  Future<void> _retrySend(Event event) async {
+    if (event.status != EventStatus.error) return;
+    try {
+      await widget.room.retrySend(event);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Ошибка повторной отправки: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
 
   /// Извлечь цитируемое сообщение из in_reply_to
   Event? _getReplyToEvent(Event event) {
