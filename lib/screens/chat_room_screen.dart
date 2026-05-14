@@ -247,10 +247,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   // ===================== ПОВТОР ОТПРАВКИ =====================
 
   Future<void> _retrySend(Event event) async {
-  Future<void> _retrySend(Event event) async {
     if (event.status != EventStatus.error) return;
     try {
-      await widget.room.retrySend(event);
+      await widget.room.sendEvent(
+        event.content,
+        txid: event.transactionId,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
