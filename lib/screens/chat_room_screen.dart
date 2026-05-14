@@ -28,6 +28,7 @@ class ChatRoomScreen extends StatefulWidget {
 
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _controller = TextEditingController();
+  final _focusNode = FocusNode();
   final _scrollController = ScrollController();
   Timeline? _timeline;
   bool _isLoading = true;
@@ -109,6 +110,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _roomUpdateSub?.cancel();
     _keyReceivedSub?.cancel();
     _controller.dispose();
+    _focusNode.dispose();
     _scrollController.dispose();
     _recordingTimer?.cancel();
     _audioRecorder.dispose();
@@ -249,9 +251,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Future<void> _retrySend(Event event) async {
     if (event.status != EventStatus.error) return;
     try {
+      // В matrix v0.22.0 нет transactionId у Event — eventId локальных событий = txid
       await widget.room.sendEvent(
         event.content,
-        txid: event.transactionId,
+        txid: event.eventId,
       );
     } catch (e) {
       if (mounted) {
@@ -269,7 +272,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Event? _getReplyToEvent(Event event) {
     final relatesTo = event.content['m.relates_to'];
     if (relatesTo == null) return null;
-    final inReplyTo = relatesTo['m.in_reply_to'];
+    final relatesToMap = relatesTo as Map<String, dynamic>?;
+    if (relatesToMap == null) return null;
+    final inReplyTo = relatesToMap['m.in_reply_to'] as Map<String, dynamic>?;
     if (inReplyTo == null) return null;
     final eventId = inReplyTo['event_id'] as String?;
     if (eventId == null) return null;
@@ -1717,7 +1722,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                         child: GestureDetector(
                                           onLongPress: () {
                                             setState(() { _replyingTo = event; });
-                                            _controller.focusNode.requestFocus();
+                                            FocusScope.of(context).requestFocus(_focusNode);
                                           },
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1747,13 +1752,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                                       const Icon(Icons.done_all, size: 12, color: Colors.white70),
                                                   ],
                                                   if (!isMe && event.status == EventStatus.error)
-                                                    const Icon(Icons.error_outline, size: 12, color: Colors.red[300]),
+                                                    Icon(Icons.error_outline, size: 12, color: Colors.red[300]),
                                                 ],
                                               ),
                                             ],
                                           ),
                                         ),
-                                      ),
                                       ),
                                     ),
                                     if (isMe) const SizedBox(width: 8),
@@ -1863,6 +1867,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               ),
               child: TextField(
                 controller: _controller,
+                focusNode: _focusNode,
                 decoration: const InputDecoration(
                   hintText: "Сообщение...",
                   border: InputBorder.none,
