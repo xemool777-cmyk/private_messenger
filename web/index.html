@@ -25,9 +25,6 @@
   <!-- Olm (E2EE library for Matrix) — MUST be loaded before Flutter -->
   <script src="olm.js"></script>
   <script>
-    // Инициализируем Olm WASM ДО загрузки Flutter
-    // Это критично для E2EE: matrix SDK вызывает olm.init() внутри Client.init(),
-    // но WASM может не успеть загрузиться. Предзагрузка решает эту проблему.
     if (typeof Olm !== 'undefined') {
       window.__olmReady = Olm.init().then(function() {
         console.log('[Olm] WASM initialized successfully, version: ' + Olm.get_library_version());
@@ -54,8 +51,6 @@
 <body>
   <script>
     window.addEventListener('load', function(ev) {
-      // Ждём пока Olm WASM загрузится ПЕРЕД запуском Flutter
-      // Это гарантирует что E2EE будет доступен когда matrix SDK вызовет olm.init()
       var olmReady = window.__olmReady || Promise.resolve();
       olmReady.then(function() {
         if (window.__olmInitialized === false) {
@@ -63,7 +58,6 @@
         } else {
           console.log('[Olm] Ready, starting Flutter app...');
         }
-        // Download main.dart.js
         _flutter.loader.loadEntrypoint({
           serviceWorker: {
             serviceWorkerVersion: serviceWorkerVersion,
@@ -75,6 +69,15 @@
           }
         });
       });
+
+      // Register service worker for PWA + push notifications
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.dart.js').then(function(reg) {
+          console.log('[SW] Registered, scope:', reg.scope);
+        }).catch(function(err) {
+          console.warn('[SW] Registration failed:', err);
+        });
+      }
     });
   </script>
 </body>

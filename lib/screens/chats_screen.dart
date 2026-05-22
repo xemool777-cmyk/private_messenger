@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:matrix/matrix.dart';
 import '../services/matrix_service.dart';
 import 'chat_room_screen.dart';
-import 'login_screen.dart';
 import 'profile_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
@@ -18,7 +16,13 @@ class ChatsScreen extends StatefulWidget {
 class _ChatsScreenState extends State<ChatsScreen> {
   List<Room> _rooms = [];
   StreamSubscription? _syncSub;
-  bool _isLoggingOut = false;
+
+  /// Храним notificationCount на момент последнего входа в чат.
+  /// Используется для локального вычисления новых непрочитанных:
+  /// displayCount = serverCount - entryCount (если serverCount > entryCount).
+  /// Это фикс для серверов, которые не сбрасывают notificationCount
+  /// при read markers (xemooll.ru).
+  final Map<String, int> _notifCountAtEntry = {};
 
   @override
   void initState() {
@@ -32,6 +36,19 @@ class _ChatsScreenState extends State<ChatsScreen> {
   void dispose() {
     _syncSub?.cancel();
     super.dispose();
+  }
+
+  /// Показывает количество непрочитанных с учётом того, что могли
+  /// быть прочитаны при входе в чат (даже если сервер не сбросил счётчик).
+  int _getDisplayCount(Room room) {
+    final serverCount = room.notificationCount;
+    final entryCount = _notifCountAtEntry[room.id];
+    if (entryCount == null) return serverCount; // ещё не заходили — как от сервера
+    if (serverCount >= entryCount) {
+      return serverCount - entryCount; // только новые после входа
+    }
+    // Сервер сбросил счётчик (стало меньше, чем при входе) — отдаём как есть
+    return serverCount;
   }
 
   void _loadRooms() {
@@ -165,50 +182,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
-  Future<void> _logout() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Выход"),
-        content: const Text("Вы уверены, что хотите выйти из аккаунта?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text("Отмена"),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text("Выйти", style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    setState(() { _isLoggingOut = true; });
-    try {
-      await widget.matrixService.logout();
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => LoginPage(matrixService: widget.matrixService),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка выхода: $e")),
-        );
-      }
-    } finally {
-      if (mounted) setState(() { _isLoggingOut = false; });
-    }
-  }
-
   String _formatTime(DateTime date) {
     return "${date.hour}:${date.minute.toString().padLeft(2, '0')}";
   }
@@ -217,7 +190,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   Future<void> _deleteChat(Room room) async {
     final messenger = ScaffoldMessenger.of(context);
     final roomId = room.id;
-    final roomName = room.displayname;
+    final roomName = room.getLocalizedDisplayname();
     final confirm = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -362,57 +335,80 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   } else if (lastEvent.messageType == MessageTypes.Video) {
                     lastMessageText = "Видео";
                   } else {
-                    lastMessageText = lastEvent.body ?? "Нет сообщений";
+                    lastMessageText = lastEvent.body;
                   }
 
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    leading: CircleAvatar(
-                      backgroundColor: isEncrypted ? Colors.green[700] : Colors.indigo[300],
-                      child: isEncrypted
-                          ? const Icon(Icons.lock, color: Colors.white, size: 20)
-                          : Text(
-                              room.displayname[0].toUpperCase(),
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    final notifCount = _getDisplayCount(room);
+                    final highlightCount = room.highlightCount;
+
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      leading: CircleAvatar(
+                        backgroundColor: isEncrypted ? Colors.green[700] : Colors.indigo[300],
+                        child: isEncrypted
+                            ? const Icon(Icons.lock, color: Colors.white, size: 20)
+                             : Text(
+                                room.getLocalizedDisplayname()[0].toUpperCase(),
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                              ),
+                      ),
+                      title: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              room.getLocalizedDisplayname(),
+                              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
                             ),
-                    ),
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            room.displayname,
-                            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
                           ),
-                        ),
-                        if (isEncrypted)
-                          Icon(Icons.lock, size: 14, color: Colors.green[600]),
-                      ],
-                    ),
-                    subtitle: Text(
-                      lastMessageText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.grey[600]),
-                    ),
-                    trailing: lastEvent != null
-                        ? Text(
-                            _formatTime(lastEvent.originServerTs),
-                            style: TextStyle(color: Colors.grey[400], fontSize: 12),
-                          )
-                        : null,
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ChatRoomScreen(
-                            matrixService: widget.matrixService,
-                            room: room,
+                          if (isEncrypted)
+                            Icon(Icons.lock, size: 14, color: Colors.green[600]),
+                        ],
+                      ),
+                      subtitle: Text(
+                        lastMessageText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: Colors.grey[600]),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (notifCount > 0)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: highlightCount > 0 ? Colors.red : Colors.indigo,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                notifCount > 99 ? '99+' : '$notifCount',
+                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          if (notifCount > 0) const SizedBox(width: 8),
+                          if (lastEvent != null)
+                            Text(
+                              _formatTime(lastEvent.originServerTs),
+                              style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                            ),
+                        ],
+                      ),
+                      onTap: () async {
+                        // Запоминаем notificationCount на момент входа в чат
+                        _notifCountAtEntry[room.id] = room.notificationCount;
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ChatRoomScreen(
+                              matrixService: widget.matrixService,
+                              room: room,
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                    onLongPress: () => _deleteChat(room),
-                  );
+                        );
+                        _loadRooms();
+                      },
+                      onLongPress: () => _deleteChat(room),
+                    );
                 },
               ),
             ),

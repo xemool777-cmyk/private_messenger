@@ -64,11 +64,14 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
     } catch (e) {
+      debugPrint('[LOGIN] Error: $e');
       String errorMsg = 'Ошибка подключения';
       if (e.toString().contains('M_FORBIDDEN')) {
         errorMsg = 'Неверный логин или пароль';
-      } else if (e.toString().contains('Connection')) {
-        errorMsg = 'Нет связи с сервером';
+      } else if (e.toString().contains('Connection') || e.toString().contains('SocketException')) {
+        errorMsg = 'Нет связи с сервером. Проверьте интернет.';
+      } else if (e.toString().contains('HttpException') || e.toString().contains('http error')) {
+        errorMsg = 'Сервер не отвечает. Попробуйте позже.';
       } else {
         errorMsg = 'Ошибка: $e';
       }
@@ -90,7 +93,7 @@ class _LoginPageState extends State<LoginPage> {
             const Icon(Icons.lock_outline, size: 60, color: Colors.indigo),
             const SizedBox(height: 20),
             const Text(
-              "Ваш сервер: ${MatrixService.serverName}",
+              "Ваш сервер: xemooll.ru",
               style: TextStyle(color: Colors.grey),
             ),
             const SizedBox(height: 30),

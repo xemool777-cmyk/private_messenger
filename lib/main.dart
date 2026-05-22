@@ -9,9 +9,18 @@ import 'screens/chat_room_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  debugPrint('[INIT] Creating MatrixService...');
   final matrixService = MatrixService();
-  await matrixService.init();
+  
+  debugPrint('[INIT] Calling matrixService.init()...');
+  try {
+    await matrixService.init();
+    debugPrint('[INIT] matrixService.init() OK');
+  } catch (e) {
+    debugPrint('[INIT] matrixService.init() FAILED: $e');
+  }
 
+  debugPrint('[INIT] Running app...');
   runApp(MyApp(matrixService: matrixService));
 }
 

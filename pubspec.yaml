@@ -4,34 +4,24 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.2.0 <4.0.0'
+  sdk: '>=3.3.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
 
-  # Matrix SDK (ядро мессенджера)
-  matrix: ^0.22.0
+  # Matrix SDK 7.x (ядро мессенджера, включает vodozemac для E2EE)
+  matrix: ^7.1.2
 
-  # Bridgefy для офлайн mesh (требует ключ API)
-  # Если Bridgefy не подключится, можно будет закомментировать эту строку
-  # bridgefy: ^1.0.0 
-
-  # Хранилище данных (hive уже транзитивная зависимость matrix,
-  # но hive_flutter нужен для Hive.initFlutter() если потребуется)
-  # hive_flutter: ^1.1.0
-  
   # Утилиты
-  path_provider: ^2.1.1
   cupertino_icons: ^1.0.6
   http: ^1.2.0
 
   # Медиа
-  image_picker: ^1.0.7
   file_picker: ^8.0.0
 
-  # Уведомления
-  flutter_local_notifications: ^17.0.0
+  # Web (для Notification API через dart:js_interop)
+  web: ^1.0.0
 
 dev_dependencies:
   flutter_test:

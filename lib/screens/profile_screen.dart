@@ -2,7 +2,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'package:http/http.dart' as http;
-import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import '../config/app_config.dart';
 import '../services/matrix_service.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -55,18 +56,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     try {
-      _displayName = await client.getDisplayName(_userId) ?? _extractLocalpart(_userId);
+      final profile = await client.getProfileFromUserId(_userId);
+      _displayName = profile.displayName ?? _extractLocalpart(_userId);
+      _avatarUrl = profile.avatarUrl;
     } catch (e) {
-      debugPrint('[PROFILE] getDisplayName failed: $e');
+      debugPrint('[PROFILE] getProfileFromUserId failed: $e');
       _displayName = _extractLocalpart(_userId);
     }
     _nameController.text = _displayName;
-
-    try {
-      _avatarUrl = await client.getAvatarUrl(_userId);
-    } catch (e) {
-      debugPrint('[PROFILE] getAvatarUrl failed: $e');
-    }
 
     // Загружаем аватар если есть
     if (_avatarUrl != null) {
@@ -102,20 +99,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return null;
   }
 
-  /// Выбрать новый аватар из галереи
+  /// Выбрать новый аватар из галереи (web-safe: FilePicker вместо ImagePicker)
   Future<void> _pickAvatar() async {
     try {
-      final picker = ImagePicker();
-      final XFile? image = await picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 512,
-        maxHeight: 512,
-        imageQuality: 80,
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
       );
-      if (image == null) return;
+      if (result == null || result.files.isEmpty) return;
 
-      final bytes = await image.readAsBytes();
-      setState(() { _newAvatarBytes = bytes; });
+      final file = result.files.first;
+      if (file.bytes == null) return;
+
+      setState(() { _newAvatarBytes = file.bytes; });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -143,7 +139,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // Сохраняем отображаемое имя
       final newName = _nameController.text.trim();
       if (newName.isNotEmpty && newName != _displayName) {
-        await client.setDisplayName(_userId, newName);
+        await client.setProfileField(client.userID!, 'displayname', {'displayname': newName});
         _displayName = newName;
         changed = true;
       }
@@ -182,7 +178,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final client = widget.matrixService.client;
     final displayAvatar = _newAvatarBytes ?? _avatarBytes;
 
     return Scaffold(
@@ -327,10 +322,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ],
                         ),
                         const SizedBox(height: 6),
-                        Text(
-                          MatrixService.serverName,
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-                        ),
+                         const Text(
+                           AppConfig.serverName,
+                           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+                         ),
                       ],
                     ),
                   ),
@@ -340,7 +335,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed: () => _logout(context),
+                      onPressed: _logout,
                       icon: const Icon(Icons.exit_to_app, color: Colors.red),
                       label: const Text("Выйти из аккаунта", style: TextStyle(color: Colors.red)),
                       style: OutlinedButton.styleFrom(
@@ -380,7 +375,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _logout(BuildContext context) async {
+  Future<void> _logout() async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
