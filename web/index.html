@@ -42,20 +42,9 @@
   <!-- Push Helper (Service Worker push subscription + Web Push API) -->
   <script src="push_helper.js"></script>
 
-  <script src="flutter.js" defer></script>
+  <!-- Flutter bootstrap — включает flutter.js, buildConfig и auto-call _flutter.loader.load() -->
+  <script src="flutter_bootstrap.js" defer></script>
 </head>
 <body>
-  <script>
-    window.addEventListener('load', function(ev) {
-      // Запускаем Flutter независимо от Olm (E2EE будет работать без Olm или в degraded режиме)
-      _flutter.loader.load({
-        onEntrypointLoaded: function(engineInitializer) {
-          engineInitializer.initializeEngine().then(function(appRunner) {
-            appRunner.runApp();
-          });
-        }
-      });
-    });
-  </script>
 </body>
 </html>
