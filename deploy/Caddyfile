@@ -1,0 +1,30 @@
+# ─── Matrix Federation ───
+xemooll.ru {
+    reverse_proxy conduit:6167
+}
+
+# ─── Matrix Client-Server API ───
+matrix.xemooll.ru {
+    reverse_proxy conduit:6167
+}
+
+# ─── Main App (Flutter Web) ───
+app.xemooll.ru {
+    # Push Gateway (проксируется в /gw/*)
+    handle_path /gw/* {
+        reverse_proxy push-gateway:3000
+    }
+
+    # Flutter Web App (nginx)
+    handle {
+        reverse_proxy nginx:80
+    }
+
+    header {
+        # Security headers
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+}

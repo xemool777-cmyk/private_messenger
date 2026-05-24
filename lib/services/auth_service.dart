@@ -71,6 +71,9 @@ class AuthService {
     _cachedUserId = _client.userID;
     debugPrint('[Matrix] After login: userID = $_cachedUserId');
 
+    // Push Subscription (Web Push + Matrix Pusher)
+    await NotificationService.instance.setupPushSubscription(_client);
+
     // E2EE диагностика после логина
     debugPrint('[Matrix] After login: encryptionEnabled = ${_client.encryptionEnabled}');
     if (_client.encryptionEnabled) {
@@ -89,6 +92,9 @@ class AuthService {
       }
       await _client.oneShotSync();
 
+      // Регистрируем push-подписку при восстановлении сессии
+      await NotificationService.instance.setupPushSubscription(_client);
+
       debugPrint('[Matrix] Session restored: encryptionEnabled = ${_client.encryptionEnabled}');
       if (_client.encryptionEnabled) {
         debugPrint('[Matrix] E2EE OK after session restore. Identity: ${_client.identityKey}');
@@ -100,6 +106,7 @@ class AuthService {
 
   /// Выход из аккаунта
   Future<void> logout() async {
+    await NotificationService.instance.removePushSubscription();
     await _client.logout();
     await NotificationService.instance.cancelAllNotifications();
   }

@@ -1,0 +1,58 @@
+version: "3.8"
+
+services:
+  # ─── Conduit (Matrix homeserver) ───
+  conduit:
+    image: ghcr.io/girlbossceo/conduit:latest
+    restart: unless-stopped
+    ports:
+      - "8448:8448"   # Federation
+    volumes:
+      - ./conduit-data:/var/lib/conduit
+      - ./conduit-config:/etc/conduit
+    environment:
+      CONDUIT_SERVER_NAME: "xemooll.ru"
+      CONDUIT_DATABASE_BACKEND: "rocksdb"
+      CONDUIT_ALLOW_REGISTRATION: "true"
+      CONDUIT_ALLOW_FEDERATION: "true"
+      CONDUIT_TRUSTED_SERVERS: "[]"
+      CONDUIT_ADDRESS: "0.0.0.0"
+      CONDUIT_PORT: "6167"
+    networks:
+      - internal
+
+  # ─── Caddy (reverse proxy) ───
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./caddy-data:/data
+      - ./caddy-config:/config
+    networks:
+      - internal
+
+  # ─── Coturn (TURN server) ───
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./coturn-config:/etc/coturn
+
+  # ─── Push Gateway (Web Push API for iOS PWA) ───
+  push-gateway:
+    build: ./push-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: ./push-gateway/.env
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge

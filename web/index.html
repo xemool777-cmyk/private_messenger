@@ -22,62 +22,39 @@
   <title>Private Messenger</title>
   <link rel="manifest" href="manifest.json">
 
-  <!-- Olm (E2EE library for Matrix) — MUST be loaded before Flutter -->
+  <!-- Olm (E2EE library for Matrix) — загружаем но не блокируем старт -->
   <script src="olm.js"></script>
   <script>
     if (typeof Olm !== 'undefined') {
-      window.__olmReady = Olm.init().then(function() {
-        console.log('[Olm] WASM initialized successfully, version: ' + Olm.get_library_version());
-        window.__olmInitialized = true;
+      Olm.init().then(function() {
+        console.log('[Olm] WASM initialized, version: ' + Olm.get_library_version());
+        window.__olmReady = true;
       }).catch(function(e) {
-        console.error('[Olm] WASM initialization FAILED:', e);
-        window.__olmInitialized = false;
-        window.__olmError = e.toString();
+        console.error('[Olm] WASM init failed:', e);
+        window.__olmReady = false;
       });
     } else {
-      console.error('[Olm] olm.js not loaded! E2EE will NOT work.');
-      window.__olmInitialized = false;
-      window.__olmError = 'Olm global not found';
+      console.warn('[Olm] olm.js not loaded');
+      window.__olmReady = false;
     }
   </script>
 
-  <script>
-    // The value below is injected by flutter build, do not touch.
-    const serviceWorkerVersion = null;
-  </script>
-  <!-- This script adds the flutter initialization JS code -->
+  <!-- Push Helper (Service Worker push subscription + Web Push API) -->
+  <script src="push_helper.js"></script>
+
   <script src="flutter.js" defer></script>
 </head>
 <body>
   <script>
     window.addEventListener('load', function(ev) {
-      var olmReady = window.__olmReady || Promise.resolve();
-      olmReady.then(function() {
-        if (window.__olmInitialized === false) {
-          console.warn('[Olm] E2EE will be disabled - WASM init failed: ' + (window.__olmError || 'unknown'));
-        } else {
-          console.log('[Olm] Ready, starting Flutter app...');
+      // Запускаем Flutter независимо от Olm (E2EE будет работать без Olm или в degraded режиме)
+      _flutter.loader.load({
+        onEntrypointLoaded: function(engineInitializer) {
+          engineInitializer.initializeEngine().then(function(appRunner) {
+            appRunner.runApp();
+          });
         }
-        _flutter.loader.loadEntrypoint({
-          serviceWorker: {
-            serviceWorkerVersion: serviceWorkerVersion,
-          },
-          onEntrypointLoaded: function(engineInitializer) {
-            engineInitializer.initializeEngine().then(function(appRunner) {
-              appRunner.runApp();
-            });
-          }
-        });
       });
-
-      // Register service worker for PWA + push notifications
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.dart.js').then(function(reg) {
-          console.log('[SW] Registered, scope:', reg.scope);
-        }).catch(function(err) {
-          console.warn('[SW] Registration failed:', err);
-        });
-      }
     });
   </script>
 </body>

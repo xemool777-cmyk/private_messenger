@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:matrix/matrix.dart';
 import 'notification_service_web.dart';
 
 class NotificationService {
@@ -39,6 +40,17 @@ class NotificationService {
 
   Future<void> cancelAllNotifications() async {
     await cancelAllNativeNotifications();
+  }
+
+  /// Регистрирует PushSubscription и Matrix Pusher на Conduit.
+  /// Вызывать после успешного логина.
+  Future<void> setupPushSubscription(Client client) async {
+    await initPushSubscription(client);
+  }
+
+  /// Удаляет push-подписку при логауте.
+  Future<void> removePushSubscription() async {
+    await unregisterPushSubscription();
   }
 
   void dispose() {

@@ -5,7 +5,9 @@
 import 'dart:async';
 import 'dart:js_interop';
 import 'package:flutter/material.dart';
+import 'package:matrix/matrix.dart';
 import 'package:web/web.dart' as web;
+import 'push_subscription_service.dart';
 
 /// JS interop для Notification API
 @JS('Notification')
@@ -73,6 +75,17 @@ Future<void> showNativeNotification({
 Future<void> cancelNativeNotification(String roomId) async {}
 
 Future<void> cancelAllNativeNotifications() async {}
+
+/// Инициализация Web Push (PushSubscription + Matrix Pusher).
+/// Вызывается после логина пользователя.
+Future<void> initPushSubscription(Client client) async {
+  await PushSubscriptionService.instance.registerAndSetupPusher(client);
+}
+
+/// Удаление push-подписки при логауте.
+Future<void> unregisterPushSubscription() async {
+  await PushSubscriptionService.instance.unregister();
+}
 
 /// Проверяет поддержку Notification API
 bool _notificationSupported() {
