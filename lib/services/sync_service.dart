@@ -3,18 +3,22 @@ import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'keys_service.dart';
 import 'notification_service.dart';
+import 'call_service.dart';
 
 /// Сервис синхронизации: слушает onSync, обрабатывает уведомления, запрашивает ключи.
 class SyncService {
   final Client _client;
   final KeysService _keys;
+  final CallService? _callService;
   StreamSubscription? _syncSub;
   bool _firstSyncDone = false;
 
   /// Текущая открытая комната (чтобы не показывать уведомление для неё)
   String? currentRoomId;
 
-  SyncService(this._client, {required KeysService keys}) : _keys = keys;
+  SyncService(this._client, {required KeysService keys, CallService? callService})
+      : _keys = keys,
+        _callService = callService;
 
   /// Начать слушать синхронизацию
   void startListening() {
@@ -23,8 +27,63 @@ class SyncService {
 
   void _startListeningForNotifications() {
     final processedEventIds = <String>{};
+    final processedInviteRoomIds = <String>{};
 
-    _syncSub = _client.onSync.stream.listen((syncUpdate) {
+    _syncSub = _client.onSync.stream.listen(
+      (syncUpdate) {
+      try {
+      // --- 1) Приглашения в комнаты ---
+      final invitedRooms = syncUpdate.rooms?.invite;
+      if (invitedRooms != null && invitedRooms.isNotEmpty) {
+        for (final entry in invitedRooms.entries) {
+          final roomId = entry.key;
+          final inviteData = entry.value;
+
+          // Извлекаем имя пригласившего из invite_state
+          String inviterName = 'Неизвестный';
+          final inviteState = inviteData.inviteState;
+          if (inviteState != null) {
+            for (final ev in inviteState) {
+              if (ev.type == 'm.room.member' &&
+                  ev.stateKey == _client.userID &&
+                  ev.content['membership'] == 'invite') {
+                final senderId = ev.senderId;
+                if (senderId != null) {
+                  inviterName = senderId.localpart ?? 'Неизвестный';
+                }
+                // Ищем displayname
+                for (final se in inviteState) {
+                  if (se.type == 'm.room.member' &&
+                      se.stateKey == senderId &&
+                      se.content['displayname'] != null) {
+                    inviterName = se.content['displayname'] as String;
+                    break;
+                  }
+                }
+                break;
+              }
+            }
+          }
+
+          // Не спамим уведомлениями об одном и том же приглашении
+          if (processedInviteRoomIds.contains(roomId)) continue;
+          processedInviteRoomIds.add(roomId);
+
+          // Проверяем, не в этой ли мы комнате сейчас
+          if (currentRoomId == roomId) continue;
+
+          debugPrint('[NOTIFY] Room invite: $roomId from $inviterName');
+
+          NotificationService.instance.showMessageNotification(
+            roomId: roomId,
+            roomName: inviterName,
+            senderName: inviterName,
+            messageText: 'Приглашает вас в чат',
+          );
+        }
+      }
+
+      // --- 2) Сообщения в joined-комнатах ---
       final joinedRooms = syncUpdate.rooms?.join;
       if (joinedRooms == null || joinedRooms.isEmpty) return;
 
@@ -57,12 +116,24 @@ class SyncService {
           if (eventType != 'm.room.message' && eventType != 'm.room.encrypted') continue;
           if (currentRoomId == roomId) continue;
 
+          // Не показываем уведомления для комнаты с активным звонком —
+          // события m.room.encrypted (call signaling) дают ложные «зашифрованное сообщение»
+          if (_callService?.activeCallRoomId == roomId) continue;
+
           final room = _client.getRoomById(roomId);
           if (room == null) continue;
 
+          String roomName;
+          try {
+            final dn = room.getLocalizedDisplayname();
+            roomName = dn.isNotEmpty ? dn : (roomId.localpart ?? roomId);
+          } catch (_) {
+            roomName = roomId.localpart ?? roomId;
+          }
+
           final isEncryptedRoom = room.getState('m.room.encryption') != null;
 
-          String senderName = senderId.localpart ?? 'Неизвестный';
+          String senderName = senderId?.localpart ?? 'Неизвестный';
           try {
             final memberEvent = room.getState('m.room.member', senderId);
             if (memberEvent != null) {
@@ -116,12 +187,22 @@ class SyncService {
 
           NotificationService.instance.showMessageNotification(
             roomId: roomId,
-            roomName: room.getLocalizedDisplayname(),
+            roomName: roomName,
             senderName: senderName,
             messageText: messageText,
           );
         }
       }
+      } catch (e, st) {
+        debugPrint('[SYNC-SERVICE] Error processing sync update: $e\n$st');
+      }
+    }, onError: (e) {
+      debugPrint('[SYNC-SERVICE] Sync stream error: $e');
+      // Переподписываемся через небольшую задержку
+      Future.delayed(const Duration(seconds: 3), () {
+        _syncSub?.cancel();
+        _startListeningForNotifications();
+      });
     });
   }
 

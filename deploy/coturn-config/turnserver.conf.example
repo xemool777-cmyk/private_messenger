@@ -1,0 +1,43 @@
+# Coturn TURN server configuration for Private Messenger
+# Media relay for WebRTC calls across NAT
+#
+# Copy this to turnserver.conf and fill in your actual values:
+#   cp turnserver.conf.example turnserver.conf
+
+listening-port=3478
+tls-listening-port=5349
+
+# VPS external IP (critical for NAT traversal)
+external-ip=YOUR_VPS_IP
+
+# Listen on all interfaces
+listening-ip=0.0.0.0
+
+# Realm — matches what Conduit advertises in turn_uris
+realm=yourdomain.com
+
+# HMAC-based ephemeral credentials (shared with Conduit config)
+# Generate with: openssl rand -hex 32
+use-auth-secret
+static-auth-secret=YOUR_HMAC_SECRET
+
+# Relay ports range for media streams
+min-port=49152
+max-port=65535
+
+# Logging
+log-file=stdout
+verbose
+
+# Allow TURN over TCP (helps restrictive firewalls)
+tcp-relay-port=3478
+alt-listening-port=0
+
+# Security best practices
+no-multicast-peers
+no-cli
+fingerprint
+lt-cred-mech
+
+# Stability
+stale-nonce=600

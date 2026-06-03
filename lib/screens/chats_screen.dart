@@ -29,7 +29,18 @@ class _ChatsScreenState extends State<ChatsScreen> {
     super.initState();
     _loadRooms();
     // Слушаем обновления синхронизации для обновления списка чатов
-    _syncSub = widget.matrixService.client.onSync.stream.listen((_) => _loadRooms());
+    _syncSub = widget.matrixService.client.onSync.stream.listen(
+      (_) {
+        try {
+          _loadRooms();
+        } catch (e) {
+          debugPrint('[CHATS] Error loading rooms: $e');
+        }
+      },
+      onError: (e) {
+        debugPrint('[CHATS] Sync stream error: $e');
+      },
+    );
   }
 
   @override
@@ -53,12 +64,66 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   void _loadRooms() {
     if (mounted) {
-      // Показываем только комнаты где мы участник (не покинутые)
       setState(() {
-        _rooms = widget.matrixService.client.rooms.where(
-          (room) => room.membership == Membership.join,
-        ).toList();
+        // Приглашения показываем первыми, затем активные чаты
+        final invited = <Room>[];
+        final joined = <Room>[];
+        for (final room in widget.matrixService.client.rooms) {
+          if (room.membership == Membership.invite) {
+            invited.add(room);
+          } else if (room.membership == Membership.join) {
+            joined.add(room);
+          }
+        }
+        _rooms = [...invited, ...joined];
       });
+    }
+  }
+
+  /// Принять приглашение в комнату
+  Future<void> _acceptInvite(Room room) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      debugPrint('[CHAT] Accepting invite to ${room.id}');
+      await room.join();
+      debugPrint('[CHAT] Joined room ${room.id}');
+      _loadRooms();
+      if (mounted) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChatRoomScreen(
+              matrixService: widget.matrixService,
+              room: room,
+            ),
+          ),
+        );
+        _loadRooms();
+      }
+    } catch (e) {
+      debugPrint('[CHAT] Accept invite error: $e');
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Ошибка принятия приглашения: $e')),
+        );
+      }
+    }
+  }
+
+  /// Отклонить приглашение
+  Future<void> _rejectInvite(Room room) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      debugPrint('[CHAT] Rejecting invite to ${room.id}');
+      await room.leave();
+      _loadRooms();
+    } catch (e) {
+      debugPrint('[CHAT] Reject invite error: $e');
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Ошибка: $e')),
+        );
+      }
     }
   }
 
@@ -125,8 +190,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       debugPrint('[E2EE] Creating chat with $userId, encryption=$wantEncryption');
                       debugPrint('[E2EE] client.encryptionEnabled = ${widget.matrixService.client.encryptionEnabled}');
 
-                      // Используем startDirectChat — он корректно создаёт DM
-                      // с шифрованием через initialState (без гонки с sync)
+                      // 1. Создаём комнату через startDirectChat
                       final roomId = await widget.matrixService.client.startDirectChat(
                         userId,
                         enableEncryption: wantEncryption,
@@ -135,39 +199,97 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
                       debugPrint('[E2EE] Room created: $roomId');
 
-                      // Проверяем что комната действительно зашифрована
-                      if (wantEncryption) {
-                        final room = widget.matrixService.client.getRoomById(roomId);
-                        final isEncrypted = room?.getState('m.room.encryption') != null;
-                        debugPrint('[E2EE] Room encryption state: $isEncrypted');
-                        if (!isEncrypted) {
-                          debugPrint('[E2EE] Encryption not in initial state, enabling manually...');
-                          if (room != null) {
-                            try {
-                              await room.enableEncryption();
-                              debugPrint('[E2EE] Encryption enabled manually');
-                            } catch (e) {
-                              debugPrint('[E2EE] Manual enable failed: $e');
-                            }
-                          } else {
-                            debugPrint('[E2EE] Room not found yet, waiting for sync...');
-                          }
+                      // 2. Ждём появления комнаты в локальном списке (до 8 секунд)
+                      Room? roomLookup;
+                      for (int i = 0; i < 16; i++) {
+                        roomLookup = widget.matrixService.client.getRoomById(roomId);
+                        if (roomLookup != null) break;
+                        await Future.delayed(const Duration(milliseconds: 500));
+                        // Принудительный sync для получения комнаты локально
+                        await widget.matrixService.client.oneShotSync();
+                      }
+
+                      if (roomLookup == null) {
+                        debugPrint('[E2EE] Room not found in local state after creation');
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text("Комната создана, но ещё не синхронизирована"),
+                              backgroundColor: Colors.orange,
+                            ),
+                          );
+                        }
+                        return;
+                      }
+
+                      final room = roomLookup;
+
+                      debugPrint('[E2EE] Room found locally, membership: ${room.membership}');
+
+                      // 3. Проверяем шифрование
+                      final isEncrypted = room.getState('m.room.encryption') != null;
+                      debugPrint('[E2EE] Room encryption state: $isEncrypted');
+
+                      if (wantEncryption && !isEncrypted) {
+                        debugPrint('[E2EE] Encryption not in initial state, enabling manually...');
+                        try {
+                          await room.enableEncryption();
+                          debugPrint('[E2EE] Encryption enabled manually');
+                        } catch (e) {
+                          debugPrint('[E2EE] Manual enable failed: $e');
                         }
                       }
+
+                      // 4. Показываем статус E2EE
+                      final e2eeStatus = wantEncryption
+                          ? (widget.matrixService.client.encryptionEnabled && isEncrypted
+                              ? '🔒 E2EE активен'
+                              : '⚠️ Шифрование не включено')
+                          : '🔓 Без шифрования';
 
                       if (mounted) {
                         messenger.showSnackBar(
                           SnackBar(
-                            content: Text(wantEncryption ? "Зашифрованный чат создан!" : "Чат создан!"),
-                            backgroundColor: Colors.green,
+                            content: Text(e2eeStatus),
+                            backgroundColor:
+                                wantEncryption && isEncrypted ? Colors.green : Colors.orange,
+                            duration: const Duration(seconds: 3),
                           ),
                         );
                       }
-                    } catch (e) {
+
+                      // 5. Авто-переход в созданную комнату
+                      if (mounted) {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ChatRoomScreen(
+                              matrixService: widget.matrixService,
+                              room: room,
+                            ),
+                          ),
+                        );
+                      }
+                    } catch (e, stack) {
                       debugPrint('[E2EE] Create chat error: $e');
+                      debugPrint('[E2EE] Stack: $stack');
+                      // Подробный вывод для bad-json и других ошибок
+                      if (e is MatrixException) {
+                        debugPrint('[E2EE] MatrixException: ${e.errcode} - ${e.error}');
+                      }
+                      String msg = '$e';
+                      // Укоротить сообщение для SnackBar
+                      if (msg.contains('FormatException') || msg.contains('bad') || msg.contains('JSON') || msg.contains('json')) {
+                        msg = 'Ошибка сервера (bad JSON). Попробуйте позже.';
+                      } else if (msg.length > 80) {
+                        msg = '${msg.substring(0, 80)}...';
+                      }
                       if (mounted) {
                         messenger.showSnackBar(
-                          SnackBar(content: Text("Ошибка: $e")),
+                          SnackBar(
+                            content: Text(msg),
+                            duration: const Duration(seconds: 4),
+                          ),
                         );
                       }
                     }
@@ -184,6 +306,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   String _formatTime(DateTime date) {
     return "${date.hour}:${date.minute.toString().padLeft(2, '0')}";
+  }
+
+  String _safeFirstChar(String name) {
+    if (name.isEmpty) return '?';
+    return name[0].toUpperCase();
   }
 
   /// Удаление чата (покинуть комнату + забыть)
@@ -217,35 +344,52 @@ class _ChatsScreenState extends State<ChatsScreen> {
     if (confirm == null) return;
 
     try {
-      // Покидаем комнату если ещё участник
+      // 1. LEAVE — покидаем комнату (используем room.leave(), он обновляет локальное состояние)
       if (room.membership == Membership.join || room.membership == Membership.invite) {
         try {
-          await widget.matrixService.client.leaveRoom(roomId);
-          debugPrint('[CHAT] Left room $roomId');
+          await room.leave();
+          debugPrint('[CHAT] Left room $roomId via room.leave()');
         } catch (e) {
-          // Возможно уже не участник — не критично
-          debugPrint('[CHAT] Leave room error (may be already left): $e');
-        }
-      }
-
-      // Удаляем (forget) комнату полностью
-      if (confirm == 'forget') {
-        try {
-          await widget.matrixService.client.forgetRoom(roomId);
-          debugPrint('[CHAT] Forgot room $roomId');
-        } catch (e) {
-          debugPrint('[CHAT] Forget room error: $e');
-          // Пробуем альтернативный способ
+          debugPrint('[CHAT] room.leave() error: $e');
+          // Fallback: прямой HTTP-запрос
           try {
-            await room.forget();
-            debugPrint('[CHAT] Forgot room via room.forget() $roomId');
+            await widget.matrixService.client.leaveRoom(roomId);
+            debugPrint('[CHAT] Left room via client.leaveRoom() $roomId');
           } catch (e2) {
-            debugPrint('[CHAT] Room.forget() also failed: $e2');
+            debugPrint('[CHAT] client.leaveRoom() also failed: $e2');
           }
         }
       }
 
-      // Обновляем список чатов
+      // 2. FORGET — удаляем комнату полностью (только если выбрано "Удалить")
+      if (confirm == 'forget') {
+        try {
+          await room.forget();
+          debugPrint('[CHAT] Forgot room $roomId via room.forget()');
+        } catch (e) {
+          debugPrint('[CHAT] room.forget() error: $e');
+          // Fallback
+          try {
+            await widget.matrixService.client.forgetRoom(roomId);
+            debugPrint('[CHAT] Forgot room via client.forgetRoom() $roomId');
+          } catch (e2) {
+            debugPrint('[CHAT] client.forgetRoom() also failed: $e2');
+          }
+        }
+      }
+
+      // 3. НЕМЕДЛЕННО удаляем комнату из локального списка, чтобы она не вернулась со следующим sync
+      setState(() {
+        _rooms.removeWhere((r) => r.id == roomId);
+      });
+
+      // 4. Принудительно синхронизируемся, чтобы серверная сторона подтвердила действие
+      try {
+        await widget.matrixService.client.oneShotSync();
+      } catch (e) {
+        debugPrint('[CHAT] Post-leave sync warning: $e');
+      }
+      // Обновляем список после sync
       _loadRooms();
 
       if (mounted) {
@@ -317,9 +461,64 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 separatorBuilder: (ctx, i) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final room = _rooms[index];
+                  final isInvite = room.membership == Membership.invite;
                   final lastEvent = room.lastEvent;
                   final isEncrypted = room.getState('m.room.encryption') != null;
 
+                  // --- Приглашение ---
+                  if (isInvite) {
+                    // Определяем имя пригласившего
+                    String inviterName = room.getLocalizedDisplayname();
+                    try {
+                      final members = room.getParticipants();
+                      for (final member in members) {
+                        if (member.membership == Membership.join) {
+                          inviterName = member.calcDisplayname() ?? inviterName;
+                          break;
+                        }
+                      }
+                    } catch (_) {}
+                    // Если имя == ID (не удалось разрешить), берём localpart
+                    if (inviterName.startsWith('@')) {
+                      inviterName = inviterName.substring(1).split(':')[0];
+                    }
+
+                    return Container(
+                      color: Colors.orange.withOpacity(0.08),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.orange[700],
+                          child: const Icon(Icons.mail_outline, color: Colors.white, size: 20),
+                        ),
+                        title: Text(
+                          inviterName,
+                          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: const Text(
+                          'Приглашает вас в чат',
+                          style: TextStyle(color: Colors.orange),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.check_circle, color: Colors.green),
+                              tooltip: 'Принять',
+                              onPressed: () => _acceptInvite(room),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.cancel, color: Colors.red),
+                              tooltip: 'Отклонить',
+                              onPressed: () => _rejectInvite(room),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  // --- Обычная комната (joined) ---
                   // Текст последнего сообщения
                   String lastMessageText;
                   if (lastEvent == null) {
@@ -334,6 +533,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     lastMessageText = "Аудио";
                   } else if (lastEvent.messageType == MessageTypes.Video) {
                     lastMessageText = "Видео";
+                  } else if (lastEvent.type.startsWith('m.call.')) {
+                    // Call events don't have a body — SDK returns "Unknown message format"
+                    lastMessageText = lastEvent.type.endsWith('invite') || lastEvent.type.endsWith('answer')
+                        ? 'Звонок'
+                        : 'Завершённый звонок';
                   } else {
                     lastMessageText = lastEvent.body;
                   }
@@ -348,7 +552,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         child: isEncrypted
                             ? const Icon(Icons.lock, color: Colors.white, size: 20)
                              : Text(
-                                room.getLocalizedDisplayname()[0].toUpperCase(),
+                                _safeFirstChar(room.getLocalizedDisplayname()),
                                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                               ),
                       ),

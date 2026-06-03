@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:record_platform_interface/record_platform_interface.dart';
+import 'package:record_web/record_web.dart';
 import 'services/matrix_service.dart';
 import 'services/notification_service.dart';
+import 'services/call_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/chats_screen.dart';
 import 'screens/chat_room_screen.dart';
@@ -9,19 +13,69 @@ import 'screens/chat_room_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  debugPrint('[INIT] Creating MatrixService...');
-  final matrixService = MatrixService();
-  
-  debugPrint('[INIT] Calling matrixService.init()...');
-  try {
-    await matrixService.init();
-    debugPrint('[INIT] matrixService.init() OK');
-  } catch (e) {
-    debugPrint('[INIT] matrixService.init() FAILED: $e');
-  }
+  // Глобальный обработчик ошибок — ловим всё, что прошло мимо try-catch
+  FlutterError.onError = (details) {
+    // Игнорируем overflow-ошибки (безобидны в web)
+    if (details.exception is FlutterError && details.exception.toString().contains('overflow')) {
+      debugPrint('[ERROR] Overflow ignored: ${details.exception}');
+      return;
+    }
+    debugPrint('[ERROR] FLUTTER: ${details.exception}\n${details.stack}');
+  };
 
-  debugPrint('[INIT] Running app...');
-  runApp(MyApp(matrixService: matrixService));
+  // Вместо серого экрана — показываем ошибку пользователю
+  ErrorWidget.builder = (details) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Colors.red[50],
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.error, size: 48, color: Colors.red),
+                const SizedBox(height: 16),
+                const Text('Ошибка приложения', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.red)),
+                const SizedBox(height: 8),
+                Text(details.exceptionAsString(), style: const TextStyle(fontSize: 13, fontFamily: 'monospace', color: Colors.black87)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  };
+
+  // Зона для необработанных асинхронных ошибок
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    // record_web plugin auto-registration may not trigger — manual fallback
+    if (kIsWeb) {
+      RecordPlatform.instance = RecordPluginWebWrapper();
+    }
+
+    debugPrint('[INIT] Creating MatrixService...');
+    final matrixService = MatrixService();
+
+    debugPrint('[INIT] Calling matrixService.init()...');
+    try {
+      await matrixService.init();
+      debugPrint('[INIT] matrixService.init() OK');
+    } catch (e) {
+      debugPrint('[INIT] matrixService.init() FAILED: $e');
+    }
+
+    // Разблокируем аудио-контекст (для рингтона входящих звонков)
+    CallService.unlockAudio();
+
+    debugPrint('[INIT] Running app...');
+    runApp(MyApp(matrixService: matrixService));
+  }, (error, stack) {
+    debugPrint('[ERROR] UNHANDLED ASYNC: $error\n$stack');
+  });
 }
 
 class MyApp extends StatefulWidget {

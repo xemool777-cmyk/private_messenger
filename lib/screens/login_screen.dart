@@ -33,6 +33,7 @@ class _LoginPageState extends State<LoginPage> {
             context,
             MaterialPageRoute(builder: (_) => ChatsScreen(matrixService: widget.matrixService)),
           );
+          _checkCryptoAndPrompt();
         }
       } catch (e) {
         // Сессия протухла — просто показываем логин
@@ -62,6 +63,7 @@ class _LoginPageState extends State<LoginPage> {
           context,
           MaterialPageRoute(builder: (_) => ChatsScreen(matrixService: widget.matrixService)),
         );
+        _checkCryptoAndPrompt();
       }
     } catch (e) {
       debugPrint('[LOGIN] Error: $e');
@@ -78,6 +80,167 @@ class _LoginPageState extends State<LoginPage> {
       setState(() { _error = errorMsg; });
     } finally {
       if (mounted) setState(() { _isLoading = false; });
+    }
+  }
+
+  /// Проверить crypto identity и показать диалог настройки/восстановления
+  Future<void> _checkCryptoAndPrompt() async {
+    // Задержка 3с — даём sync'у подтянуть accountData
+    await Future.delayed(const Duration(seconds: 3));
+    if (!mounted) return;
+
+    try {
+      final state = await widget.matrixService.checkCryptoIdentityState();
+      if (state == null) return;  // encryption not enabled at all
+      if (state.connected) return; // already connected
+
+      // Показываем диалог
+      final recoveryKeyController = TextEditingController();
+      String? dialogError;
+
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (ctx, setDialogState) {
+              final needsSetup = !state.initialized;
+              return AlertDialog(
+                title: Row(children: [
+                  Icon(needsSetup ? Icons.security : Icons.vpn_key,
+                      color: Colors.orange[700]),
+                  const SizedBox(width: 10),
+                  Text(needsSetup ? "Настройка шифрования" : "Восстановление шифрования"),
+                ]),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        needsSetup
+                            ? "Шифрование сквозное (end-to-end) ещё не настроено. "
+                                "Нажмите «Настроить» чтобы создать ключи. "
+                                "После настройки сохраните ключ восстановления — "
+                                "он понадобится на других устройствах."
+                            : "Ваше устройство не подключено к кросс-подписи. "
+                                "Чтобы сообщения расшифровывались, введите ключ восстановления "
+                                "из другого устройства.",
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      if (needsSetup) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          "Это первое устройство для этого аккаунта. "
+                          "Ключ восстановления будет показан после настройки.",
+                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                      ],
+                      if (!needsSetup) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          "Element: Настройки → Безопасность и приватность → "
+                          "Шифрование → Ключ восстановления",
+                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                        const SizedBox(height: 14),
+                        TextField(
+                          controller: recoveryKeyController,
+                          decoration: InputDecoration(
+                            hintText: 'EsTp ESYQ baBY APgP ...',
+                            hintStyle: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                            border: const OutlineInputBorder(),
+                            errorText: dialogError,
+                            errorStyle: const TextStyle(fontSize: 11),
+                          ),
+                          style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+                          maxLines: 4,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text("Пропустить"),
+                  ),
+                  if (needsSetup)
+                    ElevatedButton(
+                      onPressed: () async {
+                        setDialogState(() { dialogError = null; });
+                        Navigator.pop(dialogContext); // закрываем этот диалог
+                        // Вызываем setupCryptoIdentity еще раз — теперь accountData синхронизирована
+                        try {
+                          final ok = await widget.matrixService.keys.setupCryptoIdentity();
+                          if (ok && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Шифрование настроено! Сохраните ключ восстановления.'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          } else if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Не удалось настроить шифрование. Попробуйте позже.'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Ошибка: $e'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
+                      child: const Text("Настроить", style: TextStyle(color: Colors.white)),
+                    ),
+                  if (!needsSetup)
+                    ElevatedButton(
+                      onPressed: () async {
+                        final key = recoveryKeyController.text.trim();
+                        if (key.isEmpty) {
+                          setDialogState(() { dialogError = 'Введите ключ'; });
+                          return;
+                        }
+                        setDialogState(() { dialogError = null; });
+                        try {
+                          final ok = await widget.matrixService.restoreCryptoIdentity(key);
+                          if (ok) {
+                            Navigator.pop(dialogContext);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Ключ восстановлен! Шифрование работает.'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            }
+                          } else {
+                            setDialogState(() { dialogError = 'Неверный ключ восстановления'; });
+                          }
+                        } catch (e) {
+                          setDialogState(() { dialogError = 'Ошибка: $e'; });
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                      child: const Text("Восстановить", style: TextStyle(color: Colors.white)),
+                    ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } catch (e) {
+      debugPrint('[LOGIN] Crypto identity check error: $e');
     }
   }
 

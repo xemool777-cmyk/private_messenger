@@ -1,18 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import '../config/app_config.dart';
+import 'keys_service.dart';
 import 'notification_service.dart';
 
 /// Сервис авторизации: логин, регистрация, восстановление сессии, выход.
 class AuthService {
   final Client _client;
+  final KeysService? _keys;
 
   /// Кэшированный userId
   String? _cachedUserId;
   String get userId => _cachedUserId ?? _client.userID ?? '';
   bool get isLogged => _client.isLogged();
 
-  AuthService(this._client);
+  AuthService(this._client, {KeysService? keys}) : _keys = keys;
 
   /// Подключение к homeserver с ретраем
   Future<void> connectToHomeserver() async {
@@ -44,6 +46,9 @@ class AuthService {
 
     await connectToHomeserver();
 
+    // Сохраняем пароль для UIA при настройке E2EE
+    KeysService.setPassword(password);
+
     try {
       debugPrint('[Matrix] Attempting login for user: $username');
       await _client.login(
@@ -74,13 +79,28 @@ class AuthService {
     // Push Subscription (Web Push + Matrix Pusher)
     await NotificationService.instance.setupPushSubscription(_client);
 
-    // E2EE диагностика после логина
-    debugPrint('[Matrix] After login: encryptionEnabled = ${_client.encryptionEnabled}');
-    if (_client.encryptionEnabled) {
-      debugPrint('[Matrix] E2EE WORKING! Identity key: ${_client.identityKey}');
-      debugPrint('[Matrix] E2EE WORKING! Fingerprint key: ${_client.fingerprintKey}');
-    } else {
-      debugPrint('[Matrix] WARNING: E2EE is NOT enabled after login!');
+    // Важно: делаем oneShotSync чтобы accountData с кросс-подписью загрузилась
+    // ДО вызова setupCryptoIdentity(). Иначе на втором устройстве она увидит
+    // initialized=false и создаст НОВУЮ кросс-подпись, затерев существующую.
+    debugPrint('[Matrix] Syncing accountData before E2EE setup...');
+    await _client.oneShotSync();
+    debugPrint('[Matrix] AccountData synced');
+
+    // E2EE: проверяем encryptionEnabled и настраиваем crypto identity
+    debugPrint('[Matrix] encryptionEnabled after login: ${_client.encryptionEnabled}');
+
+    if (_client.encryptionEnabled && _keys != null) {
+      debugPrint('[E2EE] Setting up crypto identity...');
+      final e2eeReady = await _keys.setupCryptoIdentity();
+      if (e2eeReady) {
+        debugPrint('[E2EE] ✅ E2EE READY! Identity key: ${_client.identityKey}');
+        debugPrint('[E2EE] ✅ Fingerprint key: ${_client.fingerprintKey}');
+      } else {
+        debugPrint('[E2EE] ❌ E2EE setup FAILED');
+      }
+    } else if (!_client.encryptionEnabled) {
+      debugPrint('[Matrix] WARNING: encryptionEnabled is FALSE after login!');
+      debugPrint('[Matrix] vodozemac may not be initialized properly.');
     }
   }
 
@@ -96,9 +116,17 @@ class AuthService {
       await NotificationService.instance.setupPushSubscription(_client);
 
       debugPrint('[Matrix] Session restored: encryptionEnabled = ${_client.encryptionEnabled}');
-      if (_client.encryptionEnabled) {
-        debugPrint('[Matrix] E2EE OK after session restore. Identity: ${_client.identityKey}');
-      } else {
+
+      // E2EE: проверяем и настраиваем crypto identity
+      if (_client.encryptionEnabled && _keys != null) {
+        debugPrint('[E2EE] Setting up crypto identity for restored session...');
+        final e2eeReady = await _keys.setupCryptoIdentity();
+        if (e2eeReady) {
+          debugPrint('[Matrix] E2EE OK after session restore. Identity: ${_client.identityKey}');
+        } else {
+          debugPrint('[Matrix] E2EE setup FAILED after session restore');
+        }
+      } else if (!_client.encryptionEnabled) {
         debugPrint('[Matrix] WARNING: E2EE not enabled after session restore!');
       }
     }
@@ -107,6 +135,7 @@ class AuthService {
   /// Выход из аккаунта
   Future<void> logout() async {
     await NotificationService.instance.removePushSubscription();
+    await KeysService.deleteRecoveryKey(userId: _client.userID);
     await _client.logout();
     await NotificationService.instance.cancelAllNotifications();
   }

@@ -76,6 +76,9 @@ class TimelineList extends StatelessWidget {
   /// Вызывается при нажатии на изображение (открыть полноэкранно).
   final void Function(Event) onOpenImage;
 
+  /// true, пока сообщение отправляется (для индикатора загрузки).
+  final bool isSending;
+
   const TimelineList({
     super.key,
     required this.events,
@@ -92,6 +95,7 @@ class TimelineList extends StatelessWidget {
     required this.onLoadMoreHistory,
     required this.mediaService,
     required this.onOpenImage,
+    this.isSending = false,
   });
 
   @override
@@ -157,6 +161,8 @@ class TimelineList extends StatelessWidget {
           onResend: onResend,
           onRemove: onRemove,
           onOpenImage: onOpenImage,
+          timeline: timeline,
+          isSending: isSending && isMe,
         );
       },
     );

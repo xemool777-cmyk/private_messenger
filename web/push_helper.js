@@ -6,15 +6,32 @@ const PUSH_GATEWAY_URL = 'https://app.xemooll.ru/gw';
 let _swRegistration = null;
 let _pushSubscription = null;
 
+// Safe JSON parse helper — logs raw response on failure
+async function safeJsonParse(response, label) {
+  const rawText = await response.text();
+  try {
+    return JSON.parse(rawText);
+  } catch (e) {
+    console.error(`[PushHelper] JSON parse FAILED for ${label}: ${e.message}`);
+    console.error(`[PushHelper] Raw response (first 500 chars): ${rawText.substring(0, 500)}`);
+    console.error(`[PushHelper] HTTP status: ${response.status} ${response.statusText}`);
+    throw e; // re-throw so caller handles fallback
+  }
+}
+
 // Get VAPID public key from gateway
 async function getVapidPublicKey() {
   try {
     const resp = await fetch(PUSH_GATEWAY_URL + '/vapid-public-key');
-    const data = await resp.json();
+    if (!resp.ok) {
+      console.warn(`[PushHelper] VAPID key fetch failed: HTTP ${resp.status}`);
+      return 'BDnWyvvZ6i61MywqMP-xcMnxh_NKz8HD8-DM3oUYBV4SH6xreLshnFGloOffDFtrARm9PaQzczb8_KNCT6znHrM';
+    }
+    const data = await safeJsonParse(resp, 'vapid-public-key');
     return data.publicKey;
   } catch (e) {
     console.warn('[PushHelper] Cannot fetch VAPID key from gateway, using fallback');
-    return 'BC89wCDpufV5wkd3FibrXnT577bNC_Tq0DNIg49Qe6hC6sYvvwIuCUNCNdFhG06QKqqfUsGwh5gMl6UqQOHvbW0';
+    return 'BDnWyvvZ6i61MywqMP-xcMnxh_NKz8HD8-DM3oUYBV4SH6xreLshnFGloOffDFtrARm9PaQzczb8_KNCT6znHrM';
   }
 }
 
@@ -95,7 +112,10 @@ async function sendSubscriptionToGateway(subscriptionJson) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pushkey, subscription: subscriptionJson }),
     });
-    const data = await resp.json();
+    if (!resp.ok) {
+      console.warn(`[PushHelper] Gateway /register returned HTTP ${resp.status}`);
+    }
+    const data = await safeJsonParse(resp, 'gateway-register');
     console.log('[PushHelper] Gateway response:', data);
     return data.success === true;
   } catch (e) {

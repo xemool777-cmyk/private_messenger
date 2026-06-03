@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:matrix/matrix.dart';
 import '../services/matrix_service.dart';
 import '../services/notification_service.dart';
@@ -27,6 +28,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _canLoadMoreHistory = true;
 
   Event? _replyToEvent;
+  Event? _editEvent;  // событие, которое редактируем
+
+  // ---- Typing indicators (P2.7) ----
+  List<User> _typingUsers = [];
+  StreamSubscription? _typingSub;
+
+  // ---- Reaction tracking ----
+  /// Фингерпринт реакций: eventId → общее число реакций.
+  /// Сравнивается при каждом sync — при изменении показываем уведомление.
+  Map<String, int> _lastReactionFingerprint = {};
+  bool _reactionsInitialized = false;
 
   @override
   void initState() {
@@ -34,24 +46,50 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     widget.matrixService.currentRoomId = widget.room.id;
     NotificationService.instance.cancelNotification(widget.room.id);
 
-    _initTimeline();
+    // Fire-and-forget with explicit error boundary — prevent gray screen
+    _initTimeline().catchError((e, s) {
+      debugPrint('[CHAT] _initTimeline UNHANDLED: $e\n$s');
+      if (mounted) setState(() { _isLoading = false; });
+    });
 
     _keyReceivedSub = widget.room.onSessionKeyReceived.stream.listen((_) {
       if (mounted) setState(() {});
+    }, onError: (e, s) {
+      debugPrint('[CHAT] onSessionKeyReceived stream error: $e\n$s');
     });
 
     // Критично: room.onUpdate не всегда срабатывает для новых сообщений в SDK 0.22
     // client.onSync гарантированно срабатывает при каждом sync
     _syncSub = widget.matrixService.client.onSync.stream.listen((syncUpdate) {
       if (!mounted) return;
-      final joinedRooms = syncUpdate.rooms?.join;
-      if (joinedRooms == null) return;
-      if (joinedRooms.containsKey(widget.room.id)) {
+      try {
+        final joinedRooms = syncUpdate.rooms?.join;
+        if (joinedRooms == null) return;
+        if (joinedRooms.containsKey(widget.room.id)) {
+          _checkReactionChanges();
+          setState(() {});
+          _scrollToBottomIfNearEnd();
+          _markAsRead();
+        }
+      } catch (e) {
+        debugPrint('[CHAT] Sync listener error: $e');
+      }
+    });
+
+    // ---- Room update listener (fake syncs, typing, sending status) ----
+    _typingSub = widget.room.onUpdate.stream.listen((_) {
+      if (!mounted) return;
+      try {
+        final typing = widget.room.typingUsers
+            .where((u) => u != widget.matrixService.client.userID)
+            .toList();
+        final typingChanged = _typingUsers.join() != typing.join();
+        if (typingChanged) {
+          _typingUsers = typing;
+        }
         setState(() {});
-        // Прокрутить вниз если мы были внизу списка
-        _scrollToBottomIfNearEnd();
-        // Отмечаем новые сообщения прочитанными
-        _markAsRead();
+      } catch (e) {
+        debugPrint('[CHAT] Typing listener error: $e');
       }
     });
   }
@@ -61,6 +99,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     widget.matrixService.currentRoomId = null;
     _keyReceivedSub?.cancel();
     _syncSub?.cancel();
+    _typingSub?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -194,6 +233,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     setState(() { _replyToEvent = null; });
   }
 
+  void _setEditTo(Event event) {
+    setState(() {
+      _replyToEvent = null;
+      _editEvent = event;
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() { _editEvent = null; });
+  }
+
   Future<void> _resendEvent(Event event) async {
     try {
       await event.sendAgain();
@@ -220,8 +270,114 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
+  Future<void> _redactEvent(Event event) async {
+    try {
+      await widget.room.redactEvent(event.eventId);
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Ошибка удаления: $e"), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  /// Сравнивает текущие реакции с предыдущим состоянием.
+  /// Если есть изменения (новая/удалённая реакция) — показывает SnackBar.
+  void _checkReactionChanges() {
+    final tl = _timeline;
+    if (tl == null) return;
+
+    final Map<String, int> current = {};
+    for (final event in tl.events) {
+      try {
+        if (event.type != EventTypes.Message && event.type != EventTypes.Encrypted) continue;
+        if (event.messageType == MessageTypes.BadEncrypted) continue;
+        final reactions = event.aggregatedEvents(tl, RelationshipTypes.reaction);
+        if (reactions.isNotEmpty) {
+          current[event.eventId] = reactions.length;
+        }
+      } catch (_) {
+        // Пропускаем события, которые не удалось обработать
+      }
+    }
+
+    // Ищем изменения в любую сторону
+    bool hasChanges = false;
+    for (final entry in current.entries) {
+      final prev = _lastReactionFingerprint[entry.key] ?? 0;
+      if (entry.value != prev) {
+        hasChanges = true;
+        break;
+      }
+    }
+    // Проверяем также удалённые реакции (eventId который был, а теперь нет)
+    if (!hasChanges) {
+      for (final key in _lastReactionFingerprint.keys) {
+        if (!current.containsKey(key)) {
+          hasChanges = true;
+          break;
+        }
+      }
+    }
+
+    _lastReactionFingerprint = current;
+
+    // Показываем уведомление только если уже была инициализация
+    if (!_reactionsInitialized) {
+      _reactionsInitialized = true;
+      return;
+    }
+
+    if (hasChanges && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Новые реакции в чате", style: TextStyle(fontSize: 13)),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.only(bottom: 80, left: 16, right: 16),
+        ),
+      );
+    }
+  }
+
+  /// Отправить/отозвать реакцию (P2.6)
+  Future<void> _sendReaction(Event event, String emoji) async {
+    try {
+      final tl = _timeline;
+      if (tl == null) return;
+
+      final existingReactions = event.aggregatedEvents(tl, RelationshipTypes.reaction);
+      final existing = existingReactions.where(
+        (e) =>
+            (e.content['m.relates_to'] as Map<String, dynamic>?)?['key'] ==
+            emoji,
+      );
+
+      if (existing.isNotEmpty) {
+        // Toggle off: redact existing reaction
+        await widget.room.redactEvent(existing.first.eventId);
+      } else {
+        // Use SDK's built-in sendReaction
+        await widget.room.sendReaction(event.eventId, emoji);
+      }
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Ошибка реакции: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   void _showMessageActions(Event event, bool isMe) {
     final isFailed = isMe && event.status == EventStatus.error;
+    final isText = event.messageType == MessageTypes.Text;
 
     showModalBottomSheet(
       context: context,
@@ -246,6 +402,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   ),
                 ),
               if (event.body.isNotEmpty) const SizedBox(height: 12),
+               // ---- Emoji reactions row (P2.6) ----
+               Padding(
+                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                 child: Wrap(
+                   spacing: 12,
+                   runSpacing: 8,
+                   children: ['👍', '❤️', '😂', '😮', '😢', '😡', '🎉', '👎', '😍', '🤔', '👀', '💯', '🔥', '🙌', '🥳', '🤯', '😱', '💪', '🙏', '😭'].map((emoji) {
+                     return GestureDetector(
+                       onTap: () {
+                         Navigator.pop(sheetContext);
+                         _sendReaction(event, emoji);
+                       },
+                       child: Text(emoji, style: const TextStyle(fontSize: 27)),
+                     );
+                   }).toList(),
+                 ),
+               ),
+              const SizedBox(height: 4),
               ListTile(
                 leading: const Icon(Icons.reply, color: Colors.indigo),
                 title: const Text("Ответить"),
@@ -254,6 +428,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   _setReplyTo(event);
                 },
               ),
+              if (isMe && isText && !isFailed)
+                ListTile(
+                  leading: const Icon(Icons.edit, color: Colors.orange),
+                  title: const Text("Редактировать"),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _setEditTo(event);
+                  },
+                ),
+              if (isMe && !isFailed)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.red),
+                  title: const Text("Удалить для всех", style: TextStyle(color: Colors.red)),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _redactEvent(event);
+                  },
+                ),
               if (isFailed) ...[
                 ListTile(
                   leading: const Icon(Icons.refresh, color: Colors.blue),
@@ -275,8 +467,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               ListTile(
                 leading: const Icon(Icons.copy, color: Colors.grey),
                 title: const Text("Копировать текст"),
-                onTap: () {
-                  Navigator.pop(sheetContext);
+                onTap: () async {
+                  await Clipboard.setData(ClipboardData(text: event.body));
+                  if (sheetContext.mounted) {
+                    Navigator.pop(sheetContext);
+                  }
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Текст скопирован"),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  }
                 },
               ),
               const SizedBox(height: 8),
@@ -309,15 +512,48 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            Flexible(child: Text(widget.room.getLocalizedDisplayname())),
-            if (widget.room.getState('m.room.encryption') != null) ...[
-              const SizedBox(width: 6),
-              Icon(Icons.lock, size: 16, color: Colors.green[200]),
-            ],
-          ],
-        ),
+        title: _typingUsers.isEmpty
+            ? Row(
+                children: [
+                  Flexible(child: Text(widget.room.getLocalizedDisplayname())),
+                  if (widget.room.getState('m.room.encryption') != null) ...[
+                    const SizedBox(width: 6),
+                    Icon(Icons.lock, size: 16, color: Colors.green[200]),
+                  ],
+                ],
+              )
+            : Row(
+                children: [
+                  const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      _typingUsers.length == 1
+                          ? '${_typingUsers.first.calcDisplayname()} печатает...'
+                          : '${_typingUsers.length} участника печатают...',
+                      style: const TextStyle(fontSize: 14, color: Colors.grey, fontStyle: FontStyle.italic),
+                    ),
+                  ),
+                ],
+              ),
+        actions: [
+          // Аудиозвонок
+          IconButton(
+            icon: const Icon(Icons.phone),
+            tooltip: 'Аудиозвонок',
+            onPressed: () {
+              widget.matrixService.call.inviteToCall(widget.room, CallType.kVoice);
+            },
+          ),
+          // Видеозвонок
+          IconButton(
+            icon: const Icon(Icons.videocam),
+            tooltip: 'Видеозвонок',
+            onPressed: () {
+              widget.matrixService.call.inviteToCall(widget.room, CallType.kVideo);
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -366,14 +602,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                         onLoadMoreHistory: _loadMoreHistory,
                         mediaService: mediaService,
                         onOpenImage: _openFullScreenImage,
+                        isSending: _isSending,
                       ),
           ),
           // Input bar
           InputBar(
             room: widget.room,
             replyToEvent: _replyToEvent,
+            editEvent: _editEvent,
             isSending: _isSending,
             onReplyCleared: _cancelReply,
+            onEditCleared: _cancelEdit,
             onSendingChanged: () {
               if (mounted) setState(() { _isSending = !_isSending; });
             },

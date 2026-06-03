@@ -97,13 +97,22 @@ class PushSubscriptionService {
         return null;
       }
 
-      final dartValue = result.dartify();
+      // dartify может бросить FormatException если результат не JSON-объект
+      dynamic dartValue;
+      try {
+        dartValue = result.dartify();
+      } catch (e) {
+        debugPrint('[PUSH] Failed to dartify registerPush result: $e');
+        debugPrint('[PUSH] Raw result type: ${result.runtimeType}');
+        return null;
+      }
+
       if (dartValue == null) {
         debugPrint('[PUSH] JS registerPush result dartify is null');
         return null;
       }
 
-      final map = dartValue as Map<String, dynamic>;
+      final map = (dartValue as Map).cast<String, dynamic>();
       debugPrint('[PUSH] Subscribed, endpoint: ${map['endpoint']}');
       return map;
     } catch (e) {

@@ -21,3 +21,15 @@ push-gateway/node_modules/
 
 # Misc artifacts
 nul
+
+# Environment variables (secrets)
+.env
+*.env
+!*.env.example
+
+# Coturn secret config (contains HMAC key)
+deploy/coturn-config/turnserver.conf
+
+# Build artifacts (generated archives)
+*.tar.gz
+dart_files.txt

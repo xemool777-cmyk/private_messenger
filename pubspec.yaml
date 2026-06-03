@@ -13,6 +13,9 @@ dependencies:
   # Matrix SDK 7.x (ядро мессенджера, включает vodozemac для E2EE)
   matrix: ^7.1.2
 
+  # Vodozemac Flutter plugin (нативная инициализация крипто-движка)
+  flutter_vodozemac: ^0.5.0
+
   # Утилиты
   cupertino_icons: ^1.0.6
   http: ^1.2.0
@@ -20,8 +23,26 @@ dependencies:
   # Медиа
   file_picker: ^8.0.0
 
+  # Аудио
+  record: ^5.1.0          # запись с микрофона
+  record_web: ^1.3.0      # web-реализация записи
+  audioplayers: ^6.1.0    # воспроизведение аудио
+
+  # Видео
+  image_picker: ^1.1.0    # запись видео с камеры
+  video_player: ^2.9.0    # воспроизведение видео
+
+  # Permissions
+  permission_handler: ^11.3.0
+
+  # WebRTC для аудио/видео звонков
+  flutter_webrtc: ^1.4.1
+
   # Web (для Notification API через dart:js_interop)
   web: ^1.0.0
+
+  # Безопасное хранение ключей (AES-256 на native, localStorage на web)
+  flutter_secure_storage: ^9.2.0
 
 dev_dependencies:
   flutter_test:

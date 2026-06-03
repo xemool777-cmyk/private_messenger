@@ -8,8 +8,7 @@ services:
     ports:
       - "8448:8448"   # Federation
     volumes:
-      - ./conduit-data:/var/lib/conduit
-      - ./conduit-config:/etc/conduit
+      - ./conduit:/data
     environment:
       CONDUIT_SERVER_NAME: "xemooll.ru"
       CONDUIT_DATABASE_BACKEND: "rocksdb"
