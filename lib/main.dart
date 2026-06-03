@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:record_platform_interface/record_platform_interface.dart';
 import 'package:record_web/record_web.dart';
 import 'services/matrix_service.dart';
+import 'services/keys_service.dart';
 import 'services/notification_service.dart';
 import 'services/call_service.dart';
 import 'screens/login_screen.dart';
@@ -66,6 +67,14 @@ void main() async {
       debugPrint('[INIT] matrixService.init() OK');
     } catch (e) {
       debugPrint('[INIT] matrixService.init() FAILED: $e');
+    }
+
+    if (!KeysService.vodozemacReady) {
+      debugPrint('═══════════════════════════════════════════════════════');
+      debugPrint('⚠️  VODOZEMAC NOT INITIALIZED — E2EE WILL NOT WORK');
+      debugPrint('   Web: check that olm.wasm is in web/pkg/ directory');
+      debugPrint('   Native: check libolm.so is bundled correctly');
+      debugPrint('═══════════════════════════════════════════════════════');
     }
 
     // Разблокируем аудио-контекст (для рингтона входящих звонков)

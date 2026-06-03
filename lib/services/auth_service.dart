@@ -90,13 +90,13 @@ class AuthService {
     debugPrint('[Matrix] encryptionEnabled after login: ${_client.encryptionEnabled}');
 
     if (_client.encryptionEnabled && _keys != null) {
-      debugPrint('[E2EE] Setting up crypto identity...');
-      final e2eeReady = await _keys.setupCryptoIdentity();
+      debugPrint('[E2EE] Setting up crypto identity (with retry)...');
+      final e2eeReady = await _keys.setupCryptoIdentityWithRetry();
       if (e2eeReady) {
         debugPrint('[E2EE] ✅ E2EE READY! Identity key: ${_client.identityKey}');
         debugPrint('[E2EE] ✅ Fingerprint key: ${_client.fingerprintKey}');
       } else {
-        debugPrint('[E2EE] ❌ E2EE setup FAILED');
+        debugPrint('[E2EE] ❌ E2EE setup FAILED after retries');
       }
     } else if (!_client.encryptionEnabled) {
       debugPrint('[Matrix] WARNING: encryptionEnabled is FALSE after login!');
@@ -119,8 +119,8 @@ class AuthService {
 
       // E2EE: проверяем и настраиваем crypto identity
       if (_client.encryptionEnabled && _keys != null) {
-        debugPrint('[E2EE] Setting up crypto identity for restored session...');
-        final e2eeReady = await _keys.setupCryptoIdentity();
+        debugPrint('[E2EE] Setting up crypto identity for restored session (with retry)...');
+        final e2eeReady = await _keys.setupCryptoIdentityWithRetry();
         if (e2eeReady) {
           debugPrint('[Matrix] E2EE OK after session restore. Identity: ${_client.identityKey}');
         } else {

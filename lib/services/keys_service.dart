@@ -18,11 +18,17 @@ class KeysService {
   /// Флаг: был ли vodozemac инициализирован глобально
   static bool _vodInitialized = false;
 
+  /// Флаг: vodozemac успешно загрузился (true) или graceful degradation (false)
+  static bool get vodozemacReady => _vodInitialized;
+
   /// Ключ восстановления (сохраняется после initCryptoIdentity)
   static String? _recoveryKey;
 
   /// Пароль пользователя (для UIA при настройке кросс-подписи)
   static String? _password;
+
+  /// Notifier для ошибок UIA (пароль отсутствует или unsupported stages)
+  static final ValueNotifier<String?> onUiaFailed = ValueNotifier<String?>(null);
 
   KeysService(this._client);
 
@@ -157,6 +163,62 @@ class KeysService {
     } catch (e) {
       debugPrint('[E2EE] setupCryptoIdentity FAILED: $e');
       return false;
+    }
+  }
+
+  /// setupCryptoIdentity с автоматическим повтором при ошибке.
+  ///
+  /// Делает до 3 попыток с exponential backoff (2с, 4с, 8с).
+  /// Возвращает true если E2EE готово после всех попыток.
+  Future<bool> setupCryptoIdentityWithRetry({int maxAttempts = 3}) async {
+    if (!_client.encryptionEnabled) {
+      debugPrint('[E2EE] encryptionEnabled is FALSE, skipping retry');
+      return false;
+    }
+
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      debugPrint('[E2EE] setupCryptoIdentity attempt $attempt/$maxAttempts...');
+      final ok = await setupCryptoIdentity();
+      if (ok) {
+        debugPrint('[E2EE] setupCryptoIdentity SUCCESS on attempt $attempt');
+        // Верифицируем key backup после успешной настройки
+        await verifyKeyBackup();
+        return true;
+      }
+      if (attempt < maxAttempts) {
+        final delay = Duration(seconds: 2 * (1 << (attempt - 1))); // 2s, 4s, 8s
+        debugPrint('[E2EE] setupCryptoIdentity FAILED, retry in ${delay.inSeconds}s...');
+        await Future.delayed(delay);
+      }
+    }
+    debugPrint('[E2EE] setupCryptoIdentity FAILED after $maxAttempts attempts');
+    return false;
+  }
+
+  /// Проверяет, что key backup активен на сервере и локально кеширован.
+  /// Логирует диагностику. Не бросает исключений — только предупреждения.
+  Future<void> verifyKeyBackup() async {
+    if (!_client.encryptionEnabled || _client.encryption == null) return;
+    try {
+      final km = _client.encryption!.keyManager;
+      final kmEnabled = km.enabled;
+      final kmCached = await km.isCached();
+      debugPrint('[E2EE] Key backup: enabled=$kmEnabled, cached=$kmCached');
+      if (kmEnabled && kmCached) {
+        debugPrint('[E2EE] Key backup is ACTIVE — server backup ready');
+        // Гарантируем, что все inbound sessions загружены в бэкап
+        try {
+          await km.uploadInboundGroupSessions(skipIfInProgress: true);
+        } catch (_) { /* non-critical */ }
+      } else if (kmEnabled && !kmCached) {
+        debugPrint('[E2EE] ⚠️ Key backup exists on server but key not cached locally. '
+            'May need recovery key to restore.');
+      } else {
+        debugPrint('[E2EE] ⚠️ Key backup NOT enabled on server. '
+            'Messages cannot be recovered on other devices without manual key sharing.');
+      }
+    } catch (e) {
+      debugPrint('[E2EE] Key backup verification error: $e');
     }
   }
 
@@ -315,10 +377,13 @@ class KeysService {
       if (request.state != UiaRequestState.waitForUser) return;
       if (_password == null) {
         debugPrint('[E2EE] UIA: password not available, cannot complete auth');
+        onUiaFailed.value = 'Для настройки шифрования требуется пароль. '
+            'Пожалуйста, введите пароль в настройках E2EE.';
         return;
       }
       if (request.nextStages.contains('m.login.password')) {
         debugPrint('[E2EE] UIA: completing m.login.password');
+        onUiaFailed.value = null; // Ошибка исправлена
         request.completeStage(
           AuthenticationData(
             type: 'm.login.password',
@@ -334,6 +399,8 @@ class KeysService {
         );
       } else {
         debugPrint('[E2EE] UIA: unsupported stages: ${request.nextStages}');
+        onUiaFailed.value = 'Сервер запросил неподдерживаемый метод авторизации: '
+            '${request.nextStages.join(', ')}. Настройка E2EE не удалась.';
       }
     });
   }

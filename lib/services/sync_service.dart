@@ -13,6 +13,9 @@ class SyncService {
   StreamSubscription? _syncSub;
   bool _firstSyncDone = false;
 
+  /// Флаг: после восстановления sync после ошибки нужен перезапрос ключей.
+  bool _needsKeyRefreshAfterRecovery = false;
+
   /// Текущая открытая комната (чтобы не показывать уведомление для неё)
   String? currentRoomId;
 
@@ -90,6 +93,14 @@ class SyncService {
       // После первого sync — запрашиваем ключи для зашифрованных комнат
       if (!_firstSyncDone && _client.encryptionEnabled) {
         _firstSyncDone = true;
+        _keys.requestKeysForEncryptedRooms();
+      }
+
+      // После восстановления sync (ошибка → переподключение) —
+      // перезапрашиваем ключи, т.к. мы могли пропустить to-device сообщения
+      if (_needsKeyRefreshAfterRecovery && _client.encryptionEnabled) {
+        _needsKeyRefreshAfterRecovery = false;
+        debugPrint('[SYNC] Re-requesting keys after sync recovery...');
         _keys.requestKeysForEncryptedRooms();
       }
 
@@ -198,6 +209,7 @@ class SyncService {
       }
     }, onError: (e) {
       debugPrint('[SYNC-SERVICE] Sync stream error: $e');
+      _needsKeyRefreshAfterRecovery = true;
       // Переподписываемся через небольшую задержку
       Future.delayed(const Duration(seconds: 3), () {
         _syncSub?.cancel();

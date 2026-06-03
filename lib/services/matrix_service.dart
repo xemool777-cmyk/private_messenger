@@ -91,9 +91,9 @@ class MatrixService {
     // Даём sync'у время получить первый state
     await Future.delayed(const Duration(seconds: 3));
 
-    // 7. Настраиваем crypto identity (теперь sync активен)
-    debugPrint('[INIT] Checking crypto identity...');
-    final e2eeReady = await keys.setupCryptoIdentity();
+    // 7. Настраиваем crypto identity с ретраем и key backup верификацией
+    debugPrint('[INIT] Setting up crypto identity (with retry)...');
+    final e2eeReady = await keys.setupCryptoIdentityWithRetry();
     if (e2eeReady) {
       debugPrint('[INIT] E2EE is ready');
     } else {
@@ -107,7 +107,15 @@ class MatrixService {
       debugPrint('[Matrix] Fingerprint key: ${_client.fingerprintKey}');
     }
 
-    // 9. Инициализируем сервис уведомлений
+    // 9. Слушаем ошибки UIA (пароль недоступен)
+    KeysService.onUiaFailed.addListener(() {
+      final msg = KeysService.onUiaFailed.value;
+      if (msg != null) {
+        debugPrint('[E2EE] ⚠️ UIA FAILURE: $msg');
+      }
+    });
+
+    // 10. Инициализируем сервис уведомлений
     await NotificationService.instance.init();
 
     debugPrint('[INIT] MatrixService initialization complete');
