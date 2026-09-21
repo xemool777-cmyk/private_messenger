@@ -72,7 +72,7 @@ lib/
 
 ```bash
 # 1. Клонировать
-git clone <repo>
+git clone https://github.com/xemool777-cmyk/private_messenger.git
 cd private_messenger
 
 # 2. Установка зависимостей
