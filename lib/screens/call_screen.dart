@@ -11,7 +11,8 @@ import '../services/call_service.dart';
 class CallScreen extends StatefulWidget {
   final CallService callService;
   final CallSession callSession;
-  const CallScreen({super.key, required this.callService, required this.callSession});
+  const CallScreen(
+      {super.key, required this.callService, required this.callSession});
 
   @override
   State<CallScreen> createState() => _CallScreenState();
@@ -57,8 +58,10 @@ class _CallScreenState extends State<CallScreen> {
 
     // Видео-стримы
     if (widget.callSession.type == CallType.kVideo) {
-      _streamAddSub = widget.callSession.onStreamAdd.stream.listen(_onStreamAdd);
-      _streamRemovedSub = widget.callSession.onStreamRemoved.stream.listen(_onStreamRemoved);
+      _streamAddSub =
+          widget.callSession.onStreamAdd.stream.listen(_onStreamAdd);
+      _streamRemovedSub =
+          widget.callSession.onStreamRemoved.stream.listen(_onStreamRemoved);
     }
   }
 
@@ -122,9 +125,13 @@ class _CallScreenState extends State<CallScreen> {
   String _statusText() {
     switch (_callState) {
       case CallState.kFledgling:
-        return widget.callSession.isOutgoing ? 'Вызов...' : 'Входящий звонок...';
+        return widget.callSession.isOutgoing
+            ? 'Вызов...'
+            : 'Входящий звонок...';
       case CallState.kRinging:
-        return widget.callSession.isOutgoing ? 'Гудки...' : 'Входящий звонок...';
+        return widget.callSession.isOutgoing
+            ? 'Гудки...'
+            : 'Входящий звонок...';
       case CallState.kInviteSent:
       case CallState.kWaitLocalMedia:
       case CallState.kCreateOffer:
@@ -212,7 +219,8 @@ class _CallScreenState extends State<CallScreen> {
               borderRadius: BorderRadius.circular(16),
               child: rtc.RTCVideoView(
                 _remoteRenderer!,
-                objectFit: rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+                objectFit:
+                    rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
               ),
             ),
           ),
@@ -231,7 +239,8 @@ class _CallScreenState extends State<CallScreen> {
                 clipBehavior: Clip.antiAlias,
                 child: rtc.RTCVideoView(
                   _localRenderer!,
-                  objectFit: rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+                  objectFit:
+                      rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
                   mirror: true,
                 ),
               ),
@@ -242,7 +251,8 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   Widget _buildAvatarArea() {
-    final letter = _displayName.isNotEmpty ? _displayName[0].toUpperCase() : '?';
+    final letter =
+        _displayName.isNotEmpty ? _displayName[0].toUpperCase() : '?';
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -336,16 +346,18 @@ class _CallScreenState extends State<CallScreen> {
 
     // Кнопка видео
     if (_isVideo) {
-      buttons.insert(1, _callButton(
-        icon: _isVideoMuted ? Icons.videocam_off : Icons.videocam,
-        color: _isVideoMuted ? Colors.red : Colors.white24,
-        iconColor: Colors.white,
-        size: 56,
-        onPressed: () async {
-          await widget.callService.toggleVideo();
-          setState(() => _isVideoMuted = !_isVideoMuted);
-        },
-      ));
+      buttons.insert(
+          1,
+          _callButton(
+            icon: _isVideoMuted ? Icons.videocam_off : Icons.videocam,
+            color: _isVideoMuted ? Colors.red : Colors.white24,
+            iconColor: Colors.white,
+            size: 56,
+            onPressed: () async {
+              await widget.callService.toggleVideo();
+              setState(() => _isVideoMuted = !_isVideoMuted);
+            },
+          ));
     }
 
     // Кнопка сброса

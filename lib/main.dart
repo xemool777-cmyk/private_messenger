@@ -17,7 +17,8 @@ void main() async {
   // Глобальный обработчик ошибок — ловим всё, что прошло мимо try-catch
   FlutterError.onError = (details) {
     // Игнорируем overflow-ошибки (безобидны в web)
-    if (details.exception is FlutterError && details.exception.toString().contains('overflow')) {
+    if (details.exception is FlutterError &&
+        details.exception.toString().contains('overflow')) {
       debugPrint('[ERROR] Overflow ignored: ${details.exception}');
       return;
     }
@@ -38,9 +39,17 @@ void main() async {
               children: [
                 const Icon(Icons.error, size: 48, color: Colors.red),
                 const SizedBox(height: 16),
-                const Text('Ошибка приложения', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.red)),
+                const Text('Ошибка приложения',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red)),
                 const SizedBox(height: 8),
-                Text(details.exceptionAsString(), style: const TextStyle(fontSize: 13, fontFamily: 'monospace', color: Colors.black87)),
+                Text(details.exceptionAsString(),
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontFamily: 'monospace',
+                        color: Colors.black87)),
               ],
             ),
           ),
@@ -102,7 +111,8 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     // Слушаем нажатия на уведомления
-    _notifSub = NotificationService.instance.onNotificationTapped.listen((roomId) {
+    _notifSub =
+        NotificationService.instance.onNotificationTapped.listen((roomId) {
       _openChatFromNotification(roomId);
     });
   }

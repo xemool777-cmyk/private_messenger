@@ -7,8 +7,7 @@ import 'dart:typed_data';
 ///
 /// Возвращает `(bytes, name)` или `null` при отмене пользователем.
 Future<({Uint8List bytes, String name})?> pickVideoFromCamera() async {
-  final completer =
-      Completer<({Uint8List bytes, String name})?>();
+  final completer = Completer<({Uint8List bytes, String name})?>();
 
   final input = html.FileUploadInputElement()
     ..accept = 'video/*'

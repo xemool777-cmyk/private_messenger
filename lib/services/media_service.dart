@@ -8,7 +8,8 @@ import 'lru_image_cache.dart';
 /// Выделен из chat_room_screen.dart для переиспользования и управления памятью.
 class MediaService {
   final Client _client;
-  final LruImageCache _imageCache = LruImageCache(maxItems: 100, maxBytes: 50 * 1024 * 1024);
+  final LruImageCache _imageCache =
+      LruImageCache(maxItems: 100, maxBytes: 50 * 1024 * 1024);
 
   /// Дедупликация параллельных загрузок одного и того же изображения
   final Map<String, Future<Uint8List?>> _loadFutures = {};
@@ -26,18 +27,25 @@ class MediaService {
     // JPEG: FF D8 FF
     if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return true;
     // PNG: 89 50 4E 47
-    if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return true;
+    if (bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) return true;
     // GIF: 47 49 46
     if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) return true;
     // WEBP/RIFF: 52 49 46 46
-    if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46) return true;
+    if (bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46) return true;
     // BMP: 42 4D
     if (bytes[0] == 0x42 && bytes[1] == 0x4D) return true;
     return false;
   }
 
   /// Проверяет, является ли событие зашифрованным медиа
-  static bool isEncryptedMedia(Event event) => event.content.containsKey('file');
+  static bool isEncryptedMedia(Event event) =>
+      event.content.containsKey('file');
 
   // ==================== ЗАГРУЗКА ИЗОБРАЖЕНИЙ ====================
 
@@ -65,7 +73,8 @@ class MediaService {
 
   /// Попробовать все методы загрузки по очереди
   Future<Uint8List?> _loadImageAllMethods(Event event) async {
-    debugPrint("[IMAGE] Event ${event.eventId}, encrypted=${isEncryptedMedia(event)}, mxc=${event.attachmentMxcUrl}");
+    debugPrint(
+        "[IMAGE] Event ${event.eventId}, encrypted=${isEncryptedMedia(event)}, mxc=${event.attachmentMxcUrl}");
 
     // Метод 1: Authenticated media download (MSC3916)
     try {
@@ -95,14 +104,18 @@ class MediaService {
     final mxcUrl = event.attachmentMxcUrl;
     final homeserver = _client.homeserver;
     final accessToken = _client.accessToken;
-    if (mxcUrl == null || homeserver == null || accessToken == null) return null;
+    if (mxcUrl == null || homeserver == null || accessToken == null)
+      return null;
 
     final serverName = mxcUrl.host;
     final mediaId = mxcUrl.pathSegments.join('/');
-    final url = '${homeserver.scheme}://${homeserver.host}/_matrix/client/v1/media/download/$serverName/$mediaId';
+    final url =
+        '${homeserver.scheme}://${homeserver.host}/_matrix/client/v1/media/download/$serverName/$mediaId';
 
-    final response = await http.get(Uri.parse(url), headers: {'Authorization': 'Bearer $accessToken'});
-    if (response.statusCode == 200) return Uint8List.fromList(response.bodyBytes);
+    final response = await http
+        .get(Uri.parse(url), headers: {'Authorization': 'Bearer $accessToken'});
+    if (response.statusCode == 200)
+      return Uint8List.fromList(response.bodyBytes);
     return null;
   }
 
@@ -111,16 +124,20 @@ class MediaService {
     final mxcUrl = event.attachmentMxcUrl;
     final homeserver = _client.homeserver;
     final accessToken = _client.accessToken;
-    if (mxcUrl == null || homeserver == null || accessToken == null) return null;
+    if (mxcUrl == null || homeserver == null || accessToken == null)
+      return null;
 
     final serverName = mxcUrl.host;
     final mediaId = mxcUrl.pathSegments.join('/');
 
     for (final useToken in [true, false]) {
       try {
-        final url = '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/download/$serverName/$mediaId${useToken ? '?access_token=$accessToken' : ''}';
-        final response = await http.get(Uri.parse(url), headers: {'Authorization': 'Bearer $accessToken'});
-        if (response.statusCode == 200) return Uint8List.fromList(response.bodyBytes);
+        final url =
+            '${homeserver.scheme}://${homeserver.host}/_matrix/media/v3/download/$serverName/$mediaId${useToken ? '?access_token=$accessToken' : ''}';
+        final response = await http.get(Uri.parse(url),
+            headers: {'Authorization': 'Bearer $accessToken'});
+        if (response.statusCode == 200)
+          return Uint8List.fromList(response.bodyBytes);
       } catch (_) {}
     }
     return null;

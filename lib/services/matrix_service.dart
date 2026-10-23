@@ -103,8 +103,8 @@ class MatrixService {
     // 8. E2EE диагностика
     debugPrint('[INIT] encryptionEnabled = ${_client.encryptionEnabled}');
     if (_client.encryptionEnabled) {
-      debugPrint('[Matrix] Identity key: ${_client.identityKey}');
-      debugPrint('[Matrix] Fingerprint key: ${_client.fingerprintKey}');
+      // E2EE диагностика (identity и fingerprint залогированы выше, не дублируем)
+      // Отключаем вывод ключей в лог — security: ключи не должны логироваться в production
     }
 
     // 9. Слушаем ошибки UIA (пароль недоступен)
@@ -125,7 +125,8 @@ class MatrixService {
   Future<void> connectToHomeserver() => auth.connectToHomeserver();
 
   /// Логин пользователя
-  Future<void> login(String username, String password) => auth.login(username, password);
+  Future<void> login(String username, String password) =>
+      auth.login(username, password);
 
   /// Восстановление сессии
   Future<void> resumeSession() => auth.resumeSession();
@@ -156,7 +157,8 @@ class MatrixService {
 
   /// Проверить статус crypto identity
   /// Возвращает (initialized, connected) — record из Matrix SDK
-  Future<({bool initialized, bool connected})?> checkCryptoIdentityState() async {
+  Future<({bool initialized, bool connected})?>
+      checkCryptoIdentityState() async {
     if (!_client.encryptionEnabled) return null;
     try {
       return await _client.getCryptoIdentityState();

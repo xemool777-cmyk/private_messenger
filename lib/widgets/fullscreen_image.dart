@@ -79,8 +79,7 @@ class _FullscreenImageViewState extends State<FullscreenImageView> {
                   errorBuilder: (_, __, ___) => const Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.broken_image,
-                          color: Colors.white54, size: 64),
+                      Icon(Icons.broken_image, color: Colors.white54, size: 64),
                       SizedBox(height: 12),
                       Text(
                         'Не удалось отобразить',
