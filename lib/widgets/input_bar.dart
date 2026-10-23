@@ -138,7 +138,7 @@ class _InputBarState extends State<InputBar> {
   }
 
   /// Отправка отредактированного сообщения по Matrix-протоколу.
-  /// 
+  ///
   /// Согласно спецификации:
   /// - Отправляем m.room.message с m.new_content (оригинальное поле — body)
   /// - m.relates_to с rel_type: m.replace и event_id исходного события
@@ -401,7 +401,10 @@ class _InputBarState extends State<InputBar> {
       }
     } finally {
       if (sent) widget.onSendingChanged();
-      setState(() { _isRecording = false; _isSendingInternal = false; });
+      setState(() {
+        _isRecording = false;
+        _isSendingInternal = false;
+      });
     }
   }
 
@@ -437,7 +440,10 @@ class _InputBarState extends State<InputBar> {
       }
     } finally {
       if (sent) widget.onSendingChanged();
-      setState(() { _isRecording = false; _isSendingInternal = false; });
+      setState(() {
+        _isRecording = false;
+        _isSendingInternal = false;
+      });
     }
   }
 
@@ -569,21 +575,35 @@ class _InputBarState extends State<InputBar> {
   String _detectAudioFormat(Uint8List bytes) {
     if (bytes.length < 4) return 'audio/webm';
     // WebM (EBML header): 1A 45 DF A3
-    if (bytes[0] == 0x1A && bytes[1] == 0x45 && bytes[2] == 0xDF && bytes[3] == 0xA3) {
+    if (bytes[0] == 0x1A &&
+        bytes[1] == 0x45 &&
+        bytes[2] == 0xDF &&
+        bytes[3] == 0xA3) {
       return 'audio/webm';
     }
     // MP4/M4A (ISOBMFF): ftyp box at offset 4
     if (bytes.length >= 12 &&
-        bytes[0] == 0x00 && bytes[1] == 0x00 && bytes[2] == 0x00 &&
-        bytes[4] == 0x66 && bytes[5] == 0x74 && bytes[6] == 0x79 && bytes[7] == 0x70) {
+        bytes[0] == 0x00 &&
+        bytes[1] == 0x00 &&
+        bytes[2] == 0x00 &&
+        bytes[4] == 0x66 &&
+        bytes[5] == 0x74 &&
+        bytes[6] == 0x79 &&
+        bytes[7] == 0x70) {
       return 'audio/mp4';
     }
     // OGG: OggS
-    if (bytes[0] == 0x4F && bytes[1] == 0x67 && bytes[2] == 0x67 && bytes[3] == 0x53) {
+    if (bytes[0] == 0x4F &&
+        bytes[1] == 0x67 &&
+        bytes[2] == 0x67 &&
+        bytes[3] == 0x53) {
       return 'audio/ogg';
     }
     // WAV: RIFF
-    if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46) {
+    if (bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46) {
       return 'audio/wav';
     }
     // MP3: ID3 tag (49 44 33) or sync bits (FF FB/F3/F2)
@@ -645,12 +665,12 @@ class _InputBarState extends State<InputBar> {
                           if (file.bytes == null) return;
 
                           setState(() => _isSendingInternal = true);
-                          widget.onSendingChanged(); // parent: _isSending = true
+                          widget
+                              .onSendingChanged(); // parent: _isSending = true
                           final matrixFile = MatrixImageFile(
                             bytes: file.bytes!,
                             name: file.name,
-                            mimeType:
-                                _getMimeType(file.name, file.extension),
+                            mimeType: _getMimeType(file.name, file.extension),
                           );
                           await widget.room.sendFileEvent(matrixFile);
                         } catch (e) {
@@ -663,7 +683,8 @@ class _InputBarState extends State<InputBar> {
                             );
                           }
                         } finally {
-                          widget.onSendingChanged(); // parent: _isSending = false
+                          widget
+                              .onSendingChanged(); // parent: _isSending = false
                           if (mounted) {
                             setState(() => _isSendingInternal = false);
                           }
@@ -899,8 +920,7 @@ class _InputBarState extends State<InputBar> {
               _isRecording
                   ? Expanded(
                       child: Container(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
                         decoration: BoxDecoration(
                           color: Colors.red[50],
                           borderRadius: BorderRadius.circular(24),
@@ -926,8 +946,7 @@ class _InputBarState extends State<InputBar> {
                             ),
                             const Spacer(),
                             IconButton(
-                              icon: const Icon(Icons.stop,
-                                  color: Colors.red),
+                              icon: const Icon(Icons.stop, color: Colors.red),
                               onPressed: _stopRecordingAndSend,
                               tooltip: "Остановить запись и отправить",
                             ),
@@ -937,8 +956,7 @@ class _InputBarState extends State<InputBar> {
                     )
                   : Expanded(
                       child: Container(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
                         decoration: BoxDecoration(
                           color: Colors.grey[100],
                           borderRadius: BorderRadius.circular(24),
@@ -961,9 +979,8 @@ class _InputBarState extends State<InputBar> {
               // Send / Save edit button (скрыт во время записи)
               if (!_isRecording)
                 CircleAvatar(
-                  backgroundColor: widget.editEvent != null
-                      ? Colors.orange
-                      : Colors.indigo,
+                  backgroundColor:
+                      widget.editEvent != null ? Colors.orange : Colors.indigo,
                   child: _isSending
                       ? const SizedBox(
                           width: 20,
@@ -975,9 +992,7 @@ class _InputBarState extends State<InputBar> {
                         )
                       : IconButton(
                           icon: Icon(
-                            widget.editEvent != null
-                                ? Icons.check
-                                : Icons.send,
+                            widget.editEvent != null ? Icons.check : Icons.send,
                             color: Colors.white,
                             size: 20,
                           ),

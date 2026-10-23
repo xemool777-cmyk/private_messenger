@@ -25,13 +25,17 @@ class _LoginPageState extends State<LoginPage> {
   /// Попытка восстановить предыдущую сессию
   Future<void> _tryResumeSession() async {
     if (widget.matrixService.isLogged) {
-      setState(() { _isLoading = true; });
+      setState(() {
+        _isLoading = true;
+      });
       try {
         await widget.matrixService.resumeSession();
         if (mounted) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => ChatsScreen(matrixService: widget.matrixService)),
+            MaterialPageRoute(
+                builder: (_) =>
+                    ChatsScreen(matrixService: widget.matrixService)),
           );
           _checkCryptoAndPrompt();
         }
@@ -39,7 +43,10 @@ class _LoginPageState extends State<LoginPage> {
         // Сессия протухла — просто показываем логин
         debugPrint('Session resume failed: $e');
       } finally {
-        if (mounted) setState(() { _isLoading = false; });
+        if (mounted)
+          setState(() {
+            _isLoading = false;
+          });
       }
     }
   }
@@ -49,11 +56,16 @@ class _LoginPageState extends State<LoginPage> {
     final password = _passwordController.text.trim();
 
     if (username.isEmpty || password.isEmpty) {
-      setState(() { _error = 'Введите логин и пароль'; });
+      setState(() {
+        _error = 'Введите логин и пароль';
+      });
       return;
     }
 
-    setState(() { _isLoading = true; _error = null; });
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
 
     try {
       await widget.matrixService.login(username, password);
@@ -61,7 +73,8 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => ChatsScreen(matrixService: widget.matrixService)),
+          MaterialPageRoute(
+              builder: (_) => ChatsScreen(matrixService: widget.matrixService)),
         );
         _checkCryptoAndPrompt();
       }
@@ -70,16 +83,23 @@ class _LoginPageState extends State<LoginPage> {
       String errorMsg = 'Ошибка подключения';
       if (e.toString().contains('M_FORBIDDEN')) {
         errorMsg = 'Неверный логин или пароль';
-      } else if (e.toString().contains('Connection') || e.toString().contains('SocketException')) {
+      } else if (e.toString().contains('Connection') ||
+          e.toString().contains('SocketException')) {
         errorMsg = 'Нет связи с сервером. Проверьте интернет.';
-      } else if (e.toString().contains('HttpException') || e.toString().contains('http error')) {
+      } else if (e.toString().contains('HttpException') ||
+          e.toString().contains('http error')) {
         errorMsg = 'Сервер не отвечает. Попробуйте позже.';
       } else {
         errorMsg = 'Ошибка: $e';
       }
-      setState(() { _error = errorMsg; });
+      setState(() {
+        _error = errorMsg;
+      });
     } finally {
-      if (mounted) setState(() { _isLoading = false; });
+      if (mounted)
+        setState(() {
+          _isLoading = false;
+        });
     }
   }
 
@@ -91,7 +111,7 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       final state = await widget.matrixService.checkCryptoIdentityState();
-      if (state == null) return;  // encryption not enabled at all
+      if (state == null) return; // encryption not enabled at all
       if (state.connected) return; // already connected
 
       // Показываем диалог
@@ -110,7 +130,9 @@ class _LoginPageState extends State<LoginPage> {
                   Icon(needsSetup ? Icons.security : Icons.vpn_key,
                       color: Colors.orange[700]),
                   const SizedBox(width: 10),
-                  Text(needsSetup ? "Настройка шифрования" : "Восстановление шифрования"),
+                  Text(needsSetup
+                      ? "Настройка шифрования"
+                      : "Восстановление шифрования"),
                 ]),
                 content: SingleChildScrollView(
                   child: Column(
@@ -133,7 +155,8 @@ class _LoginPageState extends State<LoginPage> {
                         Text(
                           "Это первое устройство для этого аккаунта. "
                           "Ключ восстановления будет показан после настройки.",
-                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[600]),
                         ),
                       ],
                       if (!needsSetup) ...[
@@ -141,19 +164,22 @@ class _LoginPageState extends State<LoginPage> {
                         Text(
                           "Element: Настройки → Безопасность и приватность → "
                           "Шифрование → Ключ восстановления",
-                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[600]),
                         ),
                         const SizedBox(height: 14),
                         TextField(
                           controller: recoveryKeyController,
                           decoration: InputDecoration(
                             hintText: 'EsTp ESYQ baBY APgP ...',
-                            hintStyle: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                            hintStyle: TextStyle(
+                                fontSize: 12, color: Colors.grey[400]),
                             border: const OutlineInputBorder(),
                             errorText: dialogError,
                             errorStyle: const TextStyle(fontSize: 11),
                           ),
-                          style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+                          style: const TextStyle(
+                              fontSize: 13, fontFamily: 'monospace'),
                           maxLines: 4,
                         ),
                       ],
@@ -168,22 +194,27 @@ class _LoginPageState extends State<LoginPage> {
                   if (needsSetup)
                     ElevatedButton(
                       onPressed: () async {
-                        setDialogState(() { dialogError = null; });
+                        setDialogState(() {
+                          dialogError = null;
+                        });
                         Navigator.pop(dialogContext); // закрываем этот диалог
                         // Вызываем setupCryptoIdentity еще раз — теперь accountData синхронизирована
                         try {
-                          final ok = await widget.matrixService.keys.setupCryptoIdentity();
+                          final ok = await widget.matrixService.keys
+                              .setupCryptoIdentity();
                           if (ok && context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Шифрование настроено! Сохраните ключ восстановления.'),
+                                content: Text(
+                                    'Шифрование настроено! Сохраните ключ восстановления.'),
                                 backgroundColor: Colors.green,
                               ),
                             );
                           } else if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Не удалось настроить шифрование. Попробуйте позже.'),
+                                content: Text(
+                                    'Не удалось настроить шифрование. Попробуйте позже.'),
                                 backgroundColor: Colors.red,
                               ),
                             );
@@ -199,39 +230,53 @@ class _LoginPageState extends State<LoginPage> {
                           }
                         }
                       },
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
-                      child: const Text("Настроить", style: TextStyle(color: Colors.white)),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.indigo),
+                      child: const Text("Настроить",
+                          style: TextStyle(color: Colors.white)),
                     ),
                   if (!needsSetup)
                     ElevatedButton(
                       onPressed: () async {
                         final key = recoveryKeyController.text.trim();
                         if (key.isEmpty) {
-                          setDialogState(() { dialogError = 'Введите ключ'; });
+                          setDialogState(() {
+                            dialogError = 'Введите ключ';
+                          });
                           return;
                         }
-                        setDialogState(() { dialogError = null; });
+                        setDialogState(() {
+                          dialogError = null;
+                        });
                         try {
-                          final ok = await widget.matrixService.restoreCryptoIdentity(key);
+                          final ok = await widget.matrixService
+                              .restoreCryptoIdentity(key);
                           if (ok) {
                             Navigator.pop(dialogContext);
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Ключ восстановлен! Шифрование работает.'),
+                                  content: Text(
+                                      'Ключ восстановлен! Шифрование работает.'),
                                   backgroundColor: Colors.green,
                                 ),
                               );
                             }
                           } else {
-                            setDialogState(() { dialogError = 'Неверный ключ восстановления'; });
+                            setDialogState(() {
+                              dialogError = 'Неверный ключ восстановления';
+                            });
                           }
                         } catch (e) {
-                          setDialogState(() { dialogError = 'Ошибка: $e'; });
+                          setDialogState(() {
+                            dialogError = 'Ошибка: $e';
+                          });
                         }
                       },
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-                      child: const Text("Восстановить", style: TextStyle(color: Colors.white)),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange),
+                      child: const Text("Восстановить",
+                          style: TextStyle(color: Colors.white)),
                     ),
                 ],
               );

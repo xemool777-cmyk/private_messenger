@@ -45,7 +45,8 @@ class LruImageCache {
 
   /// Очистка по LRU: удаляем старые элементы пока не уложимся в лимиты
   void _evict() {
-    while ((_cache.length > maxItems || _totalBytes > maxBytes) && _cache.isNotEmpty) {
+    while ((_cache.length > maxItems || _totalBytes > maxBytes) &&
+        _cache.isNotEmpty) {
       final oldestKey = _cache.keys.first;
       final removed = _cache.remove(oldestKey)!;
       _totalBytes -= removed.length;

@@ -103,8 +103,7 @@ class MessageBubble extends StatelessWidget {
                 // — Bubble —
                 Flexible(
                   child: Container(
-                    constraints:
-                        BoxConstraints(maxWidth: screenWidth * 0.75),
+                    constraints: BoxConstraints(maxWidth: screenWidth * 0.75),
                     padding: isMedia
                         ? const EdgeInsets.all(4)
                         : const EdgeInsets.symmetric(
@@ -163,14 +162,17 @@ class MessageBubble extends StatelessWidget {
   Widget _buildReactions() {
     final tl = timeline;
     if (tl == null) return const SizedBox.shrink();
-    final reactionEvents = event.aggregatedEvents(tl, RelationshipTypes.reaction);
+    final reactionEvents =
+        event.aggregatedEvents(tl, RelationshipTypes.reaction);
     if (reactionEvents.isEmpty) return const SizedBox.shrink();
 
     // Count reactions per emoji key
     final Map<String, int> counts = {};
     for (final e in reactionEvents) {
       final relates = e.content['m.relates_to'];
-      final key = (relates is Map<String, Object?>) ? (relates['key'] as String? ?? '') : '';
+      final key = (relates is Map<String, Object?>)
+          ? (relates['key'] as String? ?? '')
+          : '';
       if (key.isNotEmpty) {
         counts[key] = (counts[key] ?? 0) + 1;
       }
@@ -230,7 +232,11 @@ class MessageBubble extends StatelessWidget {
     // Файл
     if (msgType == MessageTypes.File) {
       return _buildFileCard(
-        context, event, isMe, _fileIcon(event.attachmentMimetype), Colors.blue,
+        context,
+        event,
+        isMe,
+        _fileIcon(event.attachmentMimetype),
+        Colors.blue,
       );
     }
 
@@ -324,8 +330,12 @@ class MessageBubble extends StatelessWidget {
     IconData icon,
     Color iconColor,
   ) {
-    final fileInfo = event.content['info'] is Map<String, dynamic> ? event.content['info'] as Map<String, dynamic> : null;
-    final fileSize = fileInfo != null && fileInfo['size'] is int ? fileInfo['size'] as int : null;
+    final fileInfo = event.content['info'] is Map<String, dynamic>
+        ? event.content['info'] as Map<String, dynamic>
+        : null;
+    final fileSize = fileInfo != null && fileInfo['size'] is int
+        ? fileInfo['size'] as int
+        : null;
 
     return Container(
       padding: const EdgeInsets.all(10),
@@ -479,7 +489,8 @@ class MessageBubble extends StatelessWidget {
   // ===================== TIME & STATUS =====================
 
   Widget _buildTimeAndStatus() {
-    final isEdited = timeline != null && event.hasAggregatedEvents(timeline!, 'm.replace');
+    final isEdited =
+        timeline != null && event.hasAggregatedEvents(timeline!, 'm.replace');
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -569,7 +580,8 @@ class _StatusIcon extends StatelessWidget {
   final bool isSending;
   final Color color;
 
-  const _StatusIcon({required this.status, required this.isSending, required this.color});
+  const _StatusIcon(
+      {required this.status, required this.isSending, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -666,7 +678,8 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
       try {
         bytes = (await widget.event.downloadAndDecryptAttachment()).bytes;
       } catch (_) {
-        bytes = await widget.mediaService.authenticatedMediaDownload(widget.event);
+        bytes =
+            await widget.mediaService.authenticatedMediaDownload(widget.event);
       }
 
       if (!mounted) return;
@@ -743,7 +756,8 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
   void _downloadAudio() {
     if (_blobUrl == null) return;
     final anchor = html.AnchorElement(href: _blobUrl!)
-      ..setAttribute('download', widget.event.body.isNotEmpty ? widget.event.body : 'voice.weba')
+      ..setAttribute('download',
+          widget.event.body.isNotEmpty ? widget.event.body : 'voice.weba')
       ..style.display = 'none';
     html.document.body?.append(anchor);
     anchor.click();
@@ -778,12 +792,20 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
 
   void _webOnEnded(html.Event _) {
     _progressTimer?.cancel();
-    if (mounted) setState(() { _isPlaying = false; _position = Duration.zero; });
+    if (mounted)
+      setState(() {
+        _isPlaying = false;
+        _position = Duration.zero;
+      });
   }
 
   void _webOnError(html.Event _) {
     _progressTimer?.cancel();
-    if (mounted) setState(() { _isUnsupported = true; _isPlaying = false; });
+    if (mounted)
+      setState(() {
+        _isUnsupported = true;
+        _isPlaying = false;
+      });
   }
 
   Future<void> _loadAndPlay() async {
@@ -802,7 +824,8 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
           setState(() => _isPlaying = false);
         } else {
           await _htmlAudio!.play();
-          _progressTimer = Timer.periodic(const Duration(milliseconds: 100), _webUpdateProgress);
+          _progressTimer = Timer.periodic(
+              const Duration(milliseconds: 100), _webUpdateProgress);
           setState(() => _isPlaying = true);
         }
         return;
@@ -817,7 +840,10 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
       }
     }
 
-    setState(() { _isLoading = true; _errorMessage = null; });
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
     try {
       // Используем предзагруженные байты если есть, иначе качаем сейчас
@@ -828,7 +854,8 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
         try {
           bytes = (await widget.event.downloadAndDecryptAttachment()).bytes;
         } catch (_) {
-          bytes = (await widget.mediaService.authenticatedMediaDownload(widget.event))!;
+          bytes = (await widget.mediaService
+              .authenticatedMediaDownload(widget.event))!;
         }
         _preloadedBytes = bytes;
         // Определяем MIME если ещё не
@@ -857,12 +884,15 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
           return;
         }
         await _htmlAudio!.play();
-        _progressTimer = Timer.periodic(const Duration(milliseconds: 100), _webUpdateProgress);
+        _progressTimer = Timer.periodic(
+            const Duration(milliseconds: 100), _webUpdateProgress);
       } else {
         final tempDir = Directory.systemTemp;
         final bodyName = widget.event.body;
-        final extension = bodyName.contains('.') ? bodyName.split('.').last : 'm4a';
-        final file = File('${tempDir.path}/audioplayer_${widget.event.eventId}.$extension');
+        final extension =
+            bodyName.contains('.') ? bodyName.split('.').last : 'm4a';
+        final file = File(
+            '${tempDir.path}/audioplayer_${widget.event.eventId}.$extension');
         await file.writeAsBytes(bytes);
         await _nativePlayer!.play(DeviceFileSource(file.path));
       }
@@ -926,7 +956,8 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
     } else if (_errorMessage != null) {
       infoText = _errorMessage!;
     } else if (_isInitialized) {
-      infoText = '${_formatDuration(_position)} / ${_formatDuration(_duration)}';
+      infoText =
+          '${_formatDuration(_position)} / ${_formatDuration(_duration)}';
     } else {
       infoText = widget.event.body;
     }
@@ -955,7 +986,8 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
                         value: _isUnsupported ? 0 : progress,
                         minHeight: 3,
                         backgroundColor:
-                            (widget.isMe ? Colors.white : Colors.grey).withValues(alpha: 0.3),
+                            (widget.isMe ? Colors.white : Colors.grey)
+                                .withValues(alpha: 0.3),
                         valueColor: AlwaysStoppedAnimation<Color>(
                           _isUnsupported
                               ? Colors.orange
@@ -1023,7 +1055,8 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
       try {
         bytes = (await widget.event.downloadAndDecryptAttachment()).bytes;
       } catch (_) {
-        bytes = await widget.mediaService.authenticatedMediaDownload(widget.event);
+        bytes =
+            await widget.mediaService.authenticatedMediaDownload(widget.event);
       }
       if (bytes == null || bytes.isEmpty) return;
 
@@ -1090,7 +1123,8 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
       try {
         bytes = (await widget.event.downloadAndDecryptAttachment()).bytes;
       } catch (_) {
-        bytes = await widget.mediaService.authenticatedMediaDownload(widget.event);
+        bytes =
+            await widget.mediaService.authenticatedMediaDownload(widget.event);
       }
 
       if (bytes == null || bytes.isEmpty) return;
@@ -1142,8 +1176,10 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
         // Native: сохраняем во временный файл и открываем плеер
         final tempDir = Directory.systemTemp;
         final bodyName = widget.event.body;
-        final extension = bodyName.contains('.') ? bodyName.split('.').last : 'mp4';
-        final file = File('${tempDir.path}/video_${widget.event.eventId}.$extension');
+        final extension =
+            bodyName.contains('.') ? bodyName.split('.').last : 'mp4';
+        final file =
+            File('${tempDir.path}/video_${widget.event.eventId}.$extension');
         await file.writeAsBytes(bytes);
 
         if (mounted) {
@@ -1153,7 +1189,9 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка загрузки видео: $e"), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text("Ошибка загрузки видео: $e"),
+              backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -1161,10 +1199,12 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
     }
   }
 
-  void _openVideoPlayer(BuildContext context, String pathOrUrl, {required bool isBlob}) {
+  void _openVideoPlayer(BuildContext context, String pathOrUrl,
+      {required bool isBlob}) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => _FullscreenVideoPage(pathOrUrl: pathOrUrl, isBlob: isBlob),
+        builder: (_) =>
+            _FullscreenVideoPage(pathOrUrl: pathOrUrl, isBlob: isBlob),
       ),
     );
   }
@@ -1198,7 +1238,8 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
             ),
           // Spinner загрузки превью
           if (_isLoadingThumb)
-            const CircularProgressIndicator(strokeWidth: 3, color: Colors.white54),
+            const CircularProgressIndicator(
+                strokeWidth: 3, color: Colors.white54),
           // Play button
           if (!_isLoadingThumb)
             _isDownloading
@@ -1211,7 +1252,8 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
                       borderRadius: BorderRadius.circular(24),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.play_arrow, color: Colors.white, size: 28),
+                      icon: const Icon(Icons.play_arrow,
+                          color: Colors.white, size: 28),
                       onPressed: _downloadAndPlay,
                     ),
                   ),
@@ -1226,7 +1268,9 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11,
-                color: hasThumb ? Colors.white : (widget.isMe ? Colors.white70 : Colors.grey[700]),
+                color: hasThumb
+                    ? Colors.white
+                    : (widget.isMe ? Colors.white70 : Colors.grey[700]),
               ),
             ),
           ),
@@ -1255,7 +1299,8 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
   void initState() {
     super.initState();
     if (widget.isBlob || kIsWeb) {
-      _controller = VideoPlayerController.networkUrl(Uri.parse(widget.pathOrUrl));
+      _controller =
+          VideoPlayerController.networkUrl(Uri.parse(widget.pathOrUrl));
     } else {
       _controller = VideoPlayerController.file(File(widget.pathOrUrl));
     }
@@ -1304,13 +1349,16 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                 ),
                 // Controls
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   color: Colors.black87,
                   child: Row(
                     children: [
                       IconButton(
                         icon: Icon(
-                          _controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                          _controller.value.isPlaying
+                              ? Icons.pause
+                              : Icons.play_arrow,
                           color: Colors.white,
                         ),
                         onPressed: () {
@@ -1334,7 +1382,8 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                       ),
                       Text(
                         '${_formatDuration(_controller.value.position)} / ${_formatDuration(_controller.value.duration)}',
-                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 12),
                       ),
                     ],
                   ),
