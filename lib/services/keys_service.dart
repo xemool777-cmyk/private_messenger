@@ -152,7 +152,7 @@ class KeysService {
             await _client.restoreCryptoIdentity(_recoveryKey!);
             debugPrint('[E2EE] ✅ Crypto identity RESTORED');
             return true;
-          } catch (e, s) {
+          } catch (e) {
             debugPrint('[E2EE] ❌ restoreCryptoIdentity FAILED: $e');
             debugPrint('[E2EE] Stored key may be stale — clearing it');
             await deleteRecoveryKey(userId: _client.userID);

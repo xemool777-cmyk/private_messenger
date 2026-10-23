@@ -94,7 +94,7 @@ class MessageBubble extends StatelessWidget {
                       radius: 14,
                       backgroundColor: Colors.grey[300],
                       child: Text(
-                        ((event.senderId?.localpart) ?? '?')[0].toUpperCase(),
+                        ((event.senderId.localpart) ?? '?')[0].toUpperCase(),
                         style: const TextStyle(fontSize: 12),
                       ),
                     ),
@@ -464,7 +464,7 @@ class MessageBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            repliedEvent.senderId?.localpart ?? 'User',
+            repliedEvent.senderId.localpart ?? 'User',
             style: TextStyle(
               fontWeight: FontWeight.w600,
               fontSize: 11,

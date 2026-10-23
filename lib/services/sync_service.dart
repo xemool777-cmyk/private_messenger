@@ -51,9 +51,7 @@ class SyncService {
                     ev.stateKey == _client.userID &&
                     ev.content['membership'] == 'invite') {
                   final senderId = ev.senderId;
-                  if (senderId != null) {
-                    inviterName = senderId.localpart ?? 'Неизвестный';
-                  }
+                  inviterName = senderId.localpart ?? 'Неизвестный';
                   // Ищем displayname
                   for (final se in inviteState) {
                     if (se.type == 'm.room.member' &&
@@ -145,7 +143,7 @@ class SyncService {
 
             final isEncryptedRoom = room.getState('m.room.encryption') != null;
 
-            String senderName = senderId?.localpart ?? 'Неизвестный';
+            String senderName = senderId.localpart ?? 'Неизвестный';
             try {
               final memberEvent = room.getState('m.room.member', senderId);
               if (memberEvent != null) {

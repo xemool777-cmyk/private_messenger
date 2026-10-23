@@ -777,7 +777,7 @@ class _InputBarState extends State<InputBar> {
   Widget _buildReplyPreview() {
     if (widget.replyToEvent == null) return const SizedBox.shrink();
     final event = widget.replyToEvent!;
-    final senderName = event.senderId?.localpart ?? 'User';
+    final senderName = event.senderId.localpart ?? 'User';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
