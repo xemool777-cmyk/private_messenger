@@ -11,7 +11,8 @@ import '../widgets/fullscreen_image.dart';
 class ChatRoomScreen extends StatefulWidget {
   final MatrixService matrixService;
   final Room room;
-  const ChatRoomScreen({super.key, required this.matrixService, required this.room});
+  const ChatRoomScreen(
+      {super.key, required this.matrixService, required this.room});
 
   @override
   State<ChatRoomScreen> createState() => _ChatRoomScreenState();
@@ -28,7 +29,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _canLoadMoreHistory = true;
 
   Event? _replyToEvent;
-  Event? _editEvent;  // событие, которое редактируем
+  Event? _editEvent; // событие, которое редактируем
 
   // ---- Typing indicators (P2.7) ----
   List<User> _typingUsers = [];
@@ -49,7 +50,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     // Fire-and-forget with explicit error boundary — prevent gray screen
     _initTimeline().catchError((e, s) {
       debugPrint('[CHAT] _initTimeline UNHANDLED: $e\n$s');
-      if (mounted) setState(() { _isLoading = false; });
+      if (mounted)
+        setState(() {
+          _isLoading = false;
+        });
     });
 
     _keyReceivedSub = widget.room.onSessionKeyReceived.stream.listen((_) {
@@ -124,15 +128,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       _markAsRead();
 
       if (mounted) {
-        setState(() { _isLoading = false; });
+        setState(() {
+          _isLoading = false;
+        });
         _scrollToBottom();
       }
 
       final isEncrypted = widget.room.getState('m.room.encryption') != null;
       if (isEncrypted && _timeline != null) {
-        final undecrypted = _timeline!.events.where(
-          (e) => e.type == EventTypes.Encrypted || e.messageType == MessageTypes.BadEncrypted
-        ).length;
+        final undecrypted = _timeline!.events
+            .where((e) =>
+                e.type == EventTypes.Encrypted ||
+                e.messageType == MessageTypes.BadEncrypted)
+            .length;
         if (undecrypted > 0) {
           try {
             _timeline!.requestKeys();
@@ -145,12 +153,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
       _scrollController.addListener(() {
         onScrollToLoadHistory(
-          _scrollController, _canLoadMoreHistory, _isLoadingHistory, _loadMoreHistory,
+          _scrollController,
+          _canLoadMoreHistory,
+          _isLoadingHistory,
+          _loadMoreHistory,
         );
       });
     } catch (e) {
       debugPrint("Timeline init error: $e");
-      if (mounted) setState(() { _isLoading = false; });
+      if (mounted)
+        setState(() {
+          _isLoading = false;
+        });
     }
   }
 
@@ -169,11 +183,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   Future<void> _loadMoreHistory() async {
     if (_isLoadingHistory || !_canLoadMoreHistory) return;
-    setState(() { _isLoadingHistory = true; });
+    setState(() {
+      _isLoadingHistory = true;
+    });
     try {
       await _requestMoreHistory();
     } finally {
-      if (mounted) setState(() { _isLoadingHistory = false; });
+      if (mounted)
+        setState(() {
+          _isLoadingHistory = false;
+        });
     }
   }
 
@@ -218,19 +237,23 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   bool _hasUndecryptedEvents() {
     if (_timeline == null) return false;
-    return _timeline!.events.any(
-      (e) => e.type == EventTypes.Encrypted || e.messageType == MessageTypes.BadEncrypted
-    );
+    return _timeline!.events.any((e) =>
+        e.type == EventTypes.Encrypted ||
+        e.messageType == MessageTypes.BadEncrypted);
   }
 
   // ===================== ACTIONS =====================
 
   void _setReplyTo(Event event) {
-    setState(() { _replyToEvent = event; });
+    setState(() {
+      _replyToEvent = event;
+    });
   }
 
   void _cancelReply() {
-    setState(() { _replyToEvent = null; });
+    setState(() {
+      _replyToEvent = null;
+    });
   }
 
   void _setEditTo(Event event) {
@@ -241,7 +264,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   void _cancelEdit() {
-    setState(() { _editEvent = null; });
+    setState(() {
+      _editEvent = null;
+    });
   }
 
   Future<void> _resendEvent(Event event) async {
@@ -249,7 +274,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       await event.sendAgain();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Повторная отправка..."), backgroundColor: Colors.blue),
+          const SnackBar(
+              content: Text("Повторная отправка..."),
+              backgroundColor: Colors.blue),
         );
       }
     } catch (e) {
@@ -277,7 +304,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка удаления: $e"), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text("Ошибка удаления: $e"),
+              backgroundColor: Colors.red),
         );
       }
     }
@@ -292,9 +321,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final Map<String, int> current = {};
     for (final event in tl.events) {
       try {
-        if (event.type != EventTypes.Message && event.type != EventTypes.Encrypted) continue;
+        if (event.type != EventTypes.Message &&
+            event.type != EventTypes.Encrypted) continue;
         if (event.messageType == MessageTypes.BadEncrypted) continue;
-        final reactions = event.aggregatedEvents(tl, RelationshipTypes.reaction);
+        final reactions =
+            event.aggregatedEvents(tl, RelationshipTypes.reaction);
         if (reactions.isNotEmpty) {
           current[event.eventId] = reactions.length;
         }
@@ -348,7 +379,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       final tl = _timeline;
       if (tl == null) return;
 
-      final existingReactions = event.aggregatedEvents(tl, RelationshipTypes.reaction);
+      final existingReactions =
+          event.aggregatedEvents(tl, RelationshipTypes.reaction);
       final existing = existingReactions.where(
         (e) =>
             (e.content['m.relates_to'] as Map<String, dynamic>?)?['key'] ==
@@ -382,14 +414,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (sheetContext) {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 8),
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2))),
               const SizedBox(height: 12),
               if (event.body.isNotEmpty)
                 Padding(
@@ -402,23 +440,45 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   ),
                 ),
               if (event.body.isNotEmpty) const SizedBox(height: 12),
-               // ---- Emoji reactions row (P2.6) ----
-               Padding(
-                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                 child: Wrap(
-                   spacing: 12,
-                   runSpacing: 8,
-                   children: ['👍', '❤️', '😂', '😮', '😢', '😡', '🎉', '👎', '😍', '🤔', '👀', '💯', '🔥', '🙌', '🥳', '🤯', '😱', '💪', '🙏', '😭'].map((emoji) {
-                     return GestureDetector(
-                       onTap: () {
-                         Navigator.pop(sheetContext);
-                         _sendReaction(event, emoji);
-                       },
-                       child: Text(emoji, style: const TextStyle(fontSize: 27)),
-                     );
-                   }).toList(),
-                 ),
-               ),
+              // ---- Emoji reactions row (P2.6) ----
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    '👍',
+                    '❤️',
+                    '😂',
+                    '😮',
+                    '😢',
+                    '😡',
+                    '🎉',
+                    '👎',
+                    '😍',
+                    '🤔',
+                    '👀',
+                    '💯',
+                    '🔥',
+                    '🙌',
+                    '🥳',
+                    '🤯',
+                    '😱',
+                    '💪',
+                    '🙏',
+                    '😭'
+                  ].map((emoji) {
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _sendReaction(event, emoji);
+                      },
+                      child: Text(emoji, style: const TextStyle(fontSize: 27)),
+                    );
+                  }).toList(),
+                ),
+              ),
               const SizedBox(height: 4),
               ListTile(
                 leading: const Icon(Icons.reply, color: Colors.indigo),
@@ -440,7 +500,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               if (isMe && !isFailed)
                 ListTile(
                   leading: const Icon(Icons.delete_outline, color: Colors.red),
-                  title: const Text("Удалить для всех", style: TextStyle(color: Colors.red)),
+                  title: const Text("Удалить для всех",
+                      style: TextStyle(color: Colors.red)),
                   onTap: () {
                     Navigator.pop(sheetContext);
                     _redactEvent(event);
@@ -457,7 +518,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.delete, color: Colors.red),
-                  title: const Text("Удалить", style: TextStyle(color: Colors.red)),
+                  title: const Text("Удалить",
+                      style: TextStyle(color: Colors.red)),
                   onTap: () {
                     Navigator.pop(sheetContext);
                     _removeEvent(event);
@@ -492,13 +554,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   void _openFullScreenImage(Event event) {
     final mediaService = widget.matrixService.media;
-    Navigator.push(context, MaterialPageRoute(
-      builder: (_) => FullscreenImageView(
-        event: event,
-        cachedBytes: mediaService.cache.get(event.eventId),
-        mediaService: mediaService,
-      ),
-    ));
+    Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FullscreenImageView(
+            event: event,
+            cachedBytes: mediaService.cache.get(event.eventId),
+            mediaService: mediaService,
+          ),
+        ));
   }
 
   // ===================== BUILD =====================
@@ -524,14 +588,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               )
             : Row(
                 children: [
-                  const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
                   const SizedBox(width: 8),
                   Flexible(
                     child: Text(
                       _typingUsers.length == 1
                           ? '${_typingUsers.first.calcDisplayname()} печатает...'
                           : '${_typingUsers.length} участника печатают...',
-                      style: const TextStyle(fontSize: 14, color: Colors.grey, fontStyle: FontStyle.italic),
+                      style: const TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey,
+                          fontStyle: FontStyle.italic),
                     ),
                   ),
                 ],
@@ -542,7 +612,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             icon: const Icon(Icons.phone),
             tooltip: 'Аудиозвонок',
             onPressed: () {
-              widget.matrixService.call.inviteToCall(widget.room, CallType.kVoice);
+              widget.matrixService.call
+                  .inviteToCall(widget.room, CallType.kVoice);
             },
           ),
           // Видеозвонок
@@ -550,7 +621,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             icon: const Icon(Icons.videocam),
             tooltip: 'Видеозвонок',
             onPressed: () {
-              widget.matrixService.call.inviteToCall(widget.room, CallType.kVideo);
+              widget.matrixService.call
+                  .inviteToCall(widget.room, CallType.kVideo);
             },
           ),
         ],
@@ -560,21 +632,35 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           // Encryption warning
           if (widget.room.getState('m.room.encryption') == null)
             Container(
-              width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), color: Colors.orange[100],
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: Colors.orange[100],
               child: Row(children: [
                 Icon(Icons.lock_open, size: 18, color: Colors.orange[800]),
                 const SizedBox(width: 8),
-                Expanded(child: Text("Сквозное шифрование не включено. Ваши сообщения не защищены.", style: TextStyle(color: Colors.orange[900], fontSize: 12))),
+                Expanded(
+                    child: Text(
+                        "Сквозное шифрование не включено. Ваши сообщения не защищены.",
+                        style: TextStyle(
+                            color: Colors.orange[900], fontSize: 12))),
               ]),
             ),
           // Undecrypted banner
-          if (widget.room.getState('m.room.encryption') != null && _timeline != null && _hasUndecryptedEvents())
+          if (widget.room.getState('m.room.encryption') != null &&
+              _timeline != null &&
+              _hasUndecryptedEvents())
             Container(
-              width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), color: Colors.amber[100],
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: Colors.amber[100],
               child: Row(children: [
                 Icon(Icons.info_outline, size: 18, color: Colors.amber[800]),
                 const SizedBox(width: 8),
-                Expanded(child: Text("Некоторые сообщения не удалось расшифровать. Ключи запрошены у ваших других устройств.", style: TextStyle(color: Colors.amber[900], fontSize: 11))),
+                Expanded(
+                    child: Text(
+                        "Некоторые сообщения не удалось расшифровать. Ключи запрошены у ваших других устройств.",
+                        style:
+                            TextStyle(color: Colors.amber[900], fontSize: 11))),
               ]),
             ),
           // Timeline
@@ -582,11 +668,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : events.isEmpty
-                    ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Icon(Icons.chat, size: 48, color: Colors.grey[400]),
-                        const SizedBox(height: 8),
-                        const Text("Начните разговор!", style: TextStyle(color: Colors.grey, fontSize: 16)),
-                      ]))
+                    ? Center(
+                        child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                            Icon(Icons.chat, size: 48, color: Colors.grey[400]),
+                            const SizedBox(height: 8),
+                            const Text("Начните разговор!",
+                                style: TextStyle(
+                                    color: Colors.grey, fontSize: 16)),
+                          ]))
                     : TimelineList(
                         events: events,
                         currentUserId: client.userID ?? '',
@@ -614,7 +705,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             onReplyCleared: _cancelReply,
             onEditCleared: _cancelEdit,
             onSendingChanged: () {
-              if (mounted) setState(() { _isSending = !_isSending; });
+              if (mounted)
+                setState(() {
+                  _isSending = !_isSending;
+                });
             },
             mediaService: mediaService,
           ),

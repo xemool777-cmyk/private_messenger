@@ -63,7 +63,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (_userId.isEmpty) {
       debugPrint('[PROFILE] userID still null, cannot load profile');
-      if (mounted) setState(() { _isLoading = false; });
+      if (mounted)
+        setState(() {
+          _isLoading = false;
+        });
       return;
     }
 
@@ -82,7 +85,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _avatarBytes = await _downloadAvatar(_avatarUrl!);
     }
 
-    if (mounted) setState(() { _isLoading = false; });
+    if (mounted)
+      setState(() {
+        _isLoading = false;
+      });
   }
 
   /// Скачать аватар через MSC3916 endpoint
@@ -94,7 +100,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final serverName = mxcUrl.host;
     final mediaId = mxcUrl.pathSegments.join('/');
 
-    final url = '${homeserver.scheme}://${homeserver.host}/_matrix/client/v1/media/download/$serverName/$mediaId';
+    final url =
+        '${homeserver.scheme}://${homeserver.host}/_matrix/client/v1/media/download/$serverName/$mediaId';
 
     try {
       final response = await http.get(
@@ -123,7 +130,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final file = result.files.first;
       if (file.bytes == null) return;
 
-      setState(() { _newAvatarBytes = file.bytes; });
+      setState(() {
+        _newAvatarBytes = file.bytes;
+      });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -135,12 +144,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   /// Сохранить профиль
   Future<void> _saveProfile() async {
-    setState(() { _isSaving = true; });
+    setState(() {
+      _isSaving = true;
+    });
 
     try {
       if (_userId.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Ошибка: не удалось определить пользователя"), backgroundColor: Colors.red),
+          const SnackBar(
+              content: Text("Ошибка: не удалось определить пользователя"),
+              backgroundColor: Colors.red),
         );
         return;
       }
@@ -151,7 +164,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // Сохраняем отображаемое имя
       final newName = _nameController.text.trim();
       if (newName.isNotEmpty && newName != _displayName) {
-        await client.setProfileField(client.userID!, 'displayname', {'displayname': newName});
+        await client.setProfileField(
+            client.userID!, 'displayname', {'displayname': newName});
         _displayName = newName;
         changed = true;
       }
@@ -180,11 +194,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка сохранения: $e"), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text("Ошибка сохранения: $e"),
+              backgroundColor: Colors.red),
         );
       }
     } finally {
-      if (mounted) setState(() { _isSaving = false; });
+      if (mounted)
+        setState(() {
+          _isSaving = false;
+        });
     }
   }
 
@@ -201,10 +220,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onPressed: _isSaving ? null : _saveProfile,
               child: _isSaving
                   ? const SizedBox(
-                      width: 20, height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
                     )
-                  : const Text("Сохранить", style: TextStyle(color: Colors.white, fontSize: 16)),
+                  : const Text("Сохранить",
+                      style: TextStyle(color: Colors.white, fontSize: 16)),
             ),
         ],
       ),
@@ -234,7 +256,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     fit: BoxFit.cover,
                                     width: 140,
                                     height: 140,
-                                    errorBuilder: (_, __, ___) => _avatarPlaceholder(),
+                                    errorBuilder: (_, __, ___) =>
+                                        _avatarPlaceholder(),
                                   )
                                 : _avatarPlaceholder(),
                           ),
@@ -251,7 +274,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               shape: BoxShape.circle,
                               border: Border.all(color: Colors.white, width: 2),
                             ),
-                            child: const Icon(Icons.camera_alt, color: Colors.white, size: 20),
+                            child: const Icon(Icons.camera_alt,
+                                color: Colors.white, size: 20),
                           ),
                         ),
                       ],
@@ -277,18 +301,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.badge, color: Colors.grey[600], size: 18),
+                            Icon(Icons.badge,
+                                color: Colors.grey[600], size: 18),
                             const SizedBox(width: 8),
                             Text(
                               "Matrix ID",
-                              style: TextStyle(color: Colors.grey[600], fontSize: 12, fontWeight: FontWeight.w500),
+                              style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500),
                             ),
                           ],
                         ),
                         const SizedBox(height: 6),
                         SelectableText(
                           _userId,
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w500),
                         ),
                       ],
                     ),
@@ -312,246 +341,288 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                   // === Информация о сервере ===
-                   Container(
-                     width: double.infinity,
-                     padding: const EdgeInsets.all(16),
-                     decoration: BoxDecoration(
-                       color: Colors.grey[100],
-                       borderRadius: BorderRadius.circular(12),
-                     ),
-                     child: Column(
-                       crossAxisAlignment: CrossAxisAlignment.start,
-                       children: [
-                         Row(
-                           children: [
-                             Icon(Icons.dns, color: Colors.grey[600], size: 18),
-                             const SizedBox(width: 8),
-                             Text(
-                               "Сервер",
-                               style: TextStyle(color: Colors.grey[600], fontSize: 12, fontWeight: FontWeight.w500),
-                             ),
-                           ],
-                         ),
-                         const SizedBox(height: 6),
-                          const Text(
-                            AppConfig.serverName,
-                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-                          ),
-                       ],
-                     ),
-                   ),
-                   const SizedBox(height: 16),
-
-                    // === Шифрование E2EE ===
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: (_cryptoState != null && _cryptoState!.connected)
-                            ? Colors.green[50]
-                            : (_cryptoState != null && _cryptoState!.initialized)
-                                ? Colors.orange[50]
-                                : Colors.red[50],
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: (_cryptoState != null && _cryptoState!.connected)
-                              ? Colors.green[300]!
-                              : (_cryptoState != null && _cryptoState!.initialized)
-                                  ? Colors.orange[300]!
-                                  : Colors.red[300]!,
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                (_cryptoState != null && _cryptoState!.connected)
-                                    ? Icons.lock
-                                    : (_cryptoState != null && _cryptoState!.initialized)
-                                        ? Icons.lock_open
-                                        : Icons.lock_outline,
-                                color: (_cryptoState != null && _cryptoState!.connected)
-                                    ? Colors.green[700]
-                                    : (_cryptoState != null && _cryptoState!.initialized)
-                                        ? Colors.orange[700]
-                                        : Colors.red[700],
-                                size: 18,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                "Сквозное шифрование",
-                                style: TextStyle(
+                  // === Информация о сервере ===
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.dns, color: Colors.grey[600], size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              "Сервер",
+                              style: TextStyle(
                                   color: Colors.grey[600],
                                   fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const Spacer(),
-                              if (_cryptoState != null)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: _cryptoState!.connected
-                                        ? Colors.green[100]
-                                        : _cryptoState!.initialized
-                                            ? Colors.orange[100]
-                                            : Colors.red[100],
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    _cryptoState!.connected
-                                        ? "Подключено"
-                                        : _cryptoState!.initialized
-                                            ? "Новый ключ"
-                                            : "Не настроено",
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: _cryptoState!.connected
-                                          ? Colors.green[800]
-                                          : _cryptoState!.initialized
-                                              ? Colors.orange[800]
-                                              : Colors.red[800],
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          // ── Не настроено ──
-                          if (_cryptoState != null && !_cryptoState!.initialized) ...[
-                            Text(
-                              "Кросс-подпись не настроена. Нажмите «Настроить» чтобы создать ключи шифрования.",
-                              style: TextStyle(color: Colors.grey[700], fontSize: 11),
-                            ),
-                            const SizedBox(height: 10),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                onPressed: _isSettingUp ? null : _setupCryptoIdentity,
-                                icon: _isSettingUp
-                                    ? const SizedBox(width: 16, height: 16,
-                                        child: CircularProgressIndicator(strokeWidth: 2))
-                                    : const Icon(Icons.security, size: 18),
-                                label: Text(_isSettingUp ? 'Настройка...' : 'Настроить шифрование'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.indigo,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                ),
-                              ),
+                                  fontWeight: FontWeight.w500),
                             ),
                           ],
-                          // ── Новый ключ (initialized но не connected) ──
-                          if (_cryptoState != null &&
-                              _cryptoState!.initialized &&
-                              !_cryptoState!.connected) ...[
-                            Text(
-                              "Устройство не подключено к кросс-подписи. "
-                              "Введите ключ восстановления из другого устройства "
-                              "(Профиль → «Ключ восстановления» → скопировать).",
-                              style: TextStyle(color: Colors.grey[700], fontSize: 11),
-                            ),
-                            const SizedBox(height: 10),
-                            TextField(
-                              controller: _recoveryKeyController,
-                              decoration: InputDecoration(
-                                hintText: 'EsTp ESYQ baBY APgP ...',
-                                hintStyle: TextStyle(fontSize: 12, color: Colors.grey[400]),
-                                isDense: true,
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                errorText: _cryptoError,
-                                errorStyle: const TextStyle(fontSize: 11),
-                              ),
-                              style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
-                            ),
-                            const SizedBox(height: 8),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                onPressed: _isRestoring ? null : _restoreCryptoIdentity,
-                                icon: _isRestoring
-                                    ? const SizedBox(width: 16, height: 16,
-                                        child: CircularProgressIndicator(strokeWidth: 2))
-                                    : const Icon(Icons.vpn_key, size: 18),
-                                label: Text(_isRestoring ? 'Восстановление...' : 'Восстановить ключ'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.orange,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                ),
-                              ),
-                            ),
-                          ],
-                          // ── Подключено ──
-                          if (_cryptoState != null && _cryptoState!.connected) ...[
-                            Text(
-                              "Шифрование работает. Ваше устройство доверено.",
-                              style: TextStyle(color: Colors.green[800], fontSize: 12),
-                            ),
-                            const SizedBox(height: 6),
-                            // Ключ с кнопкой копирования
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    "Ключ восстановления: ${KeysService.savedRecoveryKey ?? '(сохранён)'}",
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey[600],
-                                      fontFamily: 'monospace',
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                SizedBox(
-                                  height: 32,
-                                  child: IconButton(
-                                    onPressed: _copyRecoveryKey,
-                                    icon: const Icon(Icons.copy, size: 16),
-                                    tooltip: 'Скопировать ключ',
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                    color: Colors.indigo[400],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                          // ── Кнопка сброса (всегда кроме «не настроено») ──
-                          if (_cryptoState != null && _cryptoState!.initialized) ...[
-                            const SizedBox(height: 12),
-                            const Divider(height: 1),
-                            const SizedBox(height: 8),
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                onPressed: _isResetting ? null : _resetCryptoIdentity,
-                                icon: _isResetting
-                                    ? const SizedBox(width: 16, height: 16,
-                                        child: CircularProgressIndicator(strokeWidth: 2))
-                                    : const Icon(Icons.refresh, size: 16, color: Colors.red),
-                                label: Text(
-                                  _isResetting ? 'Сброс...' : 'Сбросить шифрование',
-                                  style: const TextStyle(fontSize: 12, color: Colors.red),
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  side: const BorderSide(color: Colors.red),
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          AppConfig.serverName,
+                          style: TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // === Шифрование E2EE ===
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: (_cryptoState != null && _cryptoState!.connected)
+                          ? Colors.green[50]
+                          : (_cryptoState != null && _cryptoState!.initialized)
+                              ? Colors.orange[50]
+                              : Colors.red[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: (_cryptoState != null && _cryptoState!.connected)
+                            ? Colors.green[300]!
+                            : (_cryptoState != null &&
+                                    _cryptoState!.initialized)
+                                ? Colors.orange[300]!
+                                : Colors.red[300]!,
                       ),
                     ),
-                    const SizedBox(height: 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              (_cryptoState != null && _cryptoState!.connected)
+                                  ? Icons.lock
+                                  : (_cryptoState != null &&
+                                          _cryptoState!.initialized)
+                                      ? Icons.lock_open
+                                      : Icons.lock_outline,
+                              color: (_cryptoState != null &&
+                                      _cryptoState!.connected)
+                                  ? Colors.green[700]
+                                  : (_cryptoState != null &&
+                                          _cryptoState!.initialized)
+                                      ? Colors.orange[700]
+                                      : Colors.red[700],
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              "Сквозное шифрование",
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const Spacer(),
+                            if (_cryptoState != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: _cryptoState!.connected
+                                      ? Colors.green[100]
+                                      : _cryptoState!.initialized
+                                          ? Colors.orange[100]
+                                          : Colors.red[100],
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  _cryptoState!.connected
+                                      ? "Подключено"
+                                      : _cryptoState!.initialized
+                                          ? "Новый ключ"
+                                          : "Не настроено",
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _cryptoState!.connected
+                                        ? Colors.green[800]
+                                        : _cryptoState!.initialized
+                                            ? Colors.orange[800]
+                                            : Colors.red[800],
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        // ── Не настроено ──
+                        if (_cryptoState != null &&
+                            !_cryptoState!.initialized) ...[
+                          Text(
+                            "Кросс-подпись не настроена. Нажмите «Настроить» чтобы создать ключи шифрования.",
+                            style: TextStyle(
+                                color: Colors.grey[700], fontSize: 11),
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed:
+                                  _isSettingUp ? null : _setupCryptoIdentity,
+                              icon: _isSettingUp
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2))
+                                  : const Icon(Icons.security, size: 18),
+                              label: Text(_isSettingUp
+                                  ? 'Настройка...'
+                                  : 'Настроить шифрование'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.indigo,
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 10),
+                              ),
+                            ),
+                          ),
+                        ],
+                        // ── Новый ключ (initialized но не connected) ──
+                        if (_cryptoState != null &&
+                            _cryptoState!.initialized &&
+                            !_cryptoState!.connected) ...[
+                          Text(
+                            "Устройство не подключено к кросс-подписи. "
+                            "Введите ключ восстановления из другого устройства "
+                            "(Профиль → «Ключ восстановления» → скопировать).",
+                            style: TextStyle(
+                                color: Colors.grey[700], fontSize: 11),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: _recoveryKeyController,
+                            decoration: InputDecoration(
+                              hintText: 'EsTp ESYQ baBY APgP ...',
+                              hintStyle: TextStyle(
+                                  fontSize: 12, color: Colors.grey[400]),
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                              errorText: _cryptoError,
+                              errorStyle: const TextStyle(fontSize: 11),
+                            ),
+                            style: const TextStyle(
+                                fontSize: 13, fontFamily: 'monospace'),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed:
+                                  _isRestoring ? null : _restoreCryptoIdentity,
+                              icon: _isRestoring
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2))
+                                  : const Icon(Icons.vpn_key, size: 18),
+                              label: Text(_isRestoring
+                                  ? 'Восстановление...'
+                                  : 'Восстановить ключ'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 10),
+                              ),
+                            ),
+                          ),
+                        ],
+                        // ── Подключено ──
+                        if (_cryptoState != null &&
+                            _cryptoState!.connected) ...[
+                          Text(
+                            "Шифрование работает. Ваше устройство доверено.",
+                            style: TextStyle(
+                                color: Colors.green[800], fontSize: 12),
+                          ),
+                          const SizedBox(height: 6),
+                          // Ключ с кнопкой копирования
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  "Ключ восстановления: ${KeysService.savedRecoveryKey ?? '(сохранён)'}",
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey[600],
+                                    fontFamily: 'monospace',
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              SizedBox(
+                                height: 32,
+                                child: IconButton(
+                                  onPressed: _copyRecoveryKey,
+                                  icon: const Icon(Icons.copy, size: 16),
+                                  tooltip: 'Скопировать ключ',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  color: Colors.indigo[400],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        // ── Кнопка сброса (всегда кроме «не настроено») ──
+                        if (_cryptoState != null &&
+                            _cryptoState!.initialized) ...[
+                          const SizedBox(height: 12),
+                          const Divider(height: 1),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed:
+                                  _isResetting ? null : _resetCryptoIdentity,
+                              icon: _isResetting
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2))
+                                  : const Icon(Icons.refresh,
+                                      size: 16, color: Colors.red),
+                              label: Text(
+                                _isResetting
+                                    ? 'Сброс...'
+                                    : 'Сбросить шифрование',
+                                style: const TextStyle(
+                                    fontSize: 12, color: Colors.red),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Colors.red),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 8),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 32),
 
                   // === Кнопка выхода ===
                   SizedBox(
@@ -559,7 +630,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: OutlinedButton.icon(
                       onPressed: _logout,
                       icon: const Icon(Icons.exit_to_app, color: Colors.red),
-                      label: const Text("Выйти из аккаунта", style: TextStyle(color: Colors.red)),
+                      label: const Text("Выйти из аккаунта",
+                          style: TextStyle(color: Colors.red)),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         side: const BorderSide(color: Colors.red),
@@ -587,7 +659,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadCryptoState() async {
     try {
       final state = await widget.matrixService.checkCryptoIdentityState();
-      if (mounted) setState(() { _cryptoState = state; });
+      if (mounted)
+        setState(() {
+          _cryptoState = state;
+        });
     } catch (_) {}
   }
 
@@ -595,29 +670,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _restoreCryptoIdentity() async {
     final key = _recoveryKeyController.text.trim();
     if (key.isEmpty) {
-      setState(() { _cryptoError = 'Введите ключ восстановления'; });
+      setState(() {
+        _cryptoError = 'Введите ключ восстановления';
+      });
       return;
     }
 
-    setState(() { _isRestoring = true; _cryptoError = null; });
+    setState(() {
+      _isRestoring = true;
+      _cryptoError = null;
+    });
 
     try {
       final ok = await widget.matrixService.restoreCryptoIdentity(key);
       if (mounted) {
         if (ok) {
-          setState(() { _cryptoError = null; _isRestoring = false; });
+          setState(() {
+            _cryptoError = null;
+            _isRestoring = false;
+          });
           await _loadCryptoState();
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Ключ восстановлен! E2EE готово.'),
+            const SnackBar(
+                content: Text('Ключ восстановлен! E2EE готово.'),
                 backgroundColor: Colors.green),
           );
         } else {
-          setState(() { _cryptoError = 'Неверный ключ восстановления'; _isRestoring = false; });
+          setState(() {
+            _cryptoError = 'Неверный ключ восстановления';
+            _isRestoring = false;
+          });
         }
       }
     } catch (e) {
       if (mounted) {
-        setState(() { _cryptoError = 'Ошибка: $e'; _isRestoring = false; });
+        setState(() {
+          _cryptoError = 'Ошибка: $e';
+          _isRestoring = false;
+        });
       }
     }
   }
@@ -636,7 +726,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Для сброса шифрования нужен пароль от аккаунта Matrix.",
+              const Text(
+                  "Для сброса шифрования нужен пароль от аккаунта Matrix.",
                   style: TextStyle(fontSize: 13)),
               const SizedBox(height: 12),
               TextField(
@@ -646,7 +737,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   labelText: 'Пароль',
                   border: const OutlineInputBorder(),
                   suffixIcon: IconButton(
-                    icon: Icon(obscure.value ? Icons.visibility_off : Icons.visibility),
+                    icon: Icon(obscure.value
+                        ? Icons.visibility_off
+                        : Icons.visibility),
                     onPressed: () {
                       setDialogState(() {});
                       obscure.value = !obscure.value;
@@ -657,7 +750,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Отмена")),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text("Отмена")),
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, controller.text),
               child: const Text("OK"),
@@ -682,28 +777,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // Запрашиваем пароль для UIA (если ещё не сохранён)
     if (!await _ensurePassword()) return;
 
-    setState(() { _isSettingUp = true; _cryptoError = null; });
+    setState(() {
+      _isSettingUp = true;
+      _cryptoError = null;
+    });
 
     try {
       final ok = await widget.matrixService.keys.setupCryptoIdentity();
       if (mounted) {
-        setState(() { _isSettingUp = false; });
+        setState(() {
+          _isSettingUp = false;
+        });
         await _loadCryptoState();
         if (ok) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Шифрование настроено! Скопируйте ключ восстановления.'),
+            const SnackBar(
+                content: Text(
+                    'Шифрование настроено! Скопируйте ключ восстановления.'),
                 backgroundColor: Colors.green),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Не удалось настроить шифрование.'),
+            const SnackBar(
+                content: Text('Не удалось настроить шифрование.'),
                 backgroundColor: Colors.red),
           );
         }
       }
     } catch (e) {
       if (mounted) {
-        setState(() { _isSettingUp = false; });
+        setState(() {
+          _isSettingUp = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Ошибка: $e'), backgroundColor: Colors.red),
         );
@@ -723,11 +828,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           "Продолжить?",
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Отмена")),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Отмена")),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text("Сбросить", style: TextStyle(color: Colors.white)),
+            child:
+                const Text("Сбросить", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -738,12 +846,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // Запрашиваем пароль для UIA (если ещё не сохранён)
     if (!await _ensurePassword()) return;
 
-    setState(() { _isResetting = true; _cryptoError = null; });
+    setState(() {
+      _isResetting = true;
+      _cryptoError = null;
+    });
 
     try {
       final newKey = await widget.matrixService.resetCryptoIdentity();
       if (mounted) {
-        setState(() { _isResetting = false; });
+        setState(() {
+          _isResetting = false;
+        });
         await _loadCryptoState();
         if (newKey != null) {
           // Показываем новый ключ в диалоге с кнопкой копирования
@@ -771,7 +884,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     child: SelectableText(
                       newKey,
-                      style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                      style: const TextStyle(
+                          fontSize: 11, fontFamily: 'monospace'),
                     ),
                   ),
                 ],
@@ -781,7 +895,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: newKey));
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Ключ скопирован!'),
+                      const SnackBar(
+                          content: Text('Ключ скопирован!'),
                           backgroundColor: Colors.green),
                     );
                     Navigator.pop(ctx);
@@ -797,14 +912,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Не удалось сбросить шифрование.'),
+            const SnackBar(
+                content: Text('Не удалось сбросить шифрование.'),
                 backgroundColor: Colors.red),
           );
         }
       }
     } catch (e) {
       if (mounted) {
-        setState(() { _isResetting = false; });
+        setState(() {
+          _isResetting = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Ошибка: $e'), backgroundColor: Colors.red),
         );
@@ -818,13 +936,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (key == null || key.isEmpty) return;
     Clipboard.setData(ClipboardData(text: key));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ключ скопирован в буфер обмена!'),
+      const SnackBar(
+          content: Text('Ключ скопирован в буфер обмена!'),
           backgroundColor: Colors.green),
     );
   }
 
   Widget _avatarPlaceholder() {
-    final letter = _displayName.isNotEmpty ? _displayName[0].toUpperCase() : '?';
+    final letter =
+        _displayName.isNotEmpty ? _displayName[0].toUpperCase() : '?';
     return Center(
       child: Text(
         letter,

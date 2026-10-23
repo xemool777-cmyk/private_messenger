@@ -25,7 +25,8 @@ extension type JSNotificationOptions._(JSObject _) implements JSObject {
   external JSNotificationOptions({String? body, String? tag});
 }
 
-Future<void> initNativeNotifications(StreamController<String> payloadController) async {
+Future<void> initNativeNotifications(
+    StreamController<String> payloadController) async {
   try {
     if (!_notificationSupported()) {
       debugPrint('[NOTIFY] Web: Notification API not supported');
@@ -37,7 +38,8 @@ Future<void> initNativeNotifications(StreamController<String> payloadController)
     if (perm != 'denied') {
       try {
         await JSNotification.requestPermission().toDart;
-        debugPrint('[NOTIFY] Web: Permission after request = ${JSNotification.permission}');
+        debugPrint(
+            '[NOTIFY] Web: Permission after request = ${JSNotification.permission}');
       } catch (e) {
         debugPrint('[NOTIFY] Web: requestPermission error: $e');
       }

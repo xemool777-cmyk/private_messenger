@@ -125,7 +125,8 @@ class MatrixService {
   Future<void> connectToHomeserver() => auth.connectToHomeserver();
 
   /// Логин пользователя
-  Future<void> login(String username, String password) => auth.login(username, password);
+  Future<void> login(String username, String password) =>
+      auth.login(username, password);
 
   /// Восстановление сессии
   Future<void> resumeSession() => auth.resumeSession();
@@ -156,7 +157,8 @@ class MatrixService {
 
   /// Проверить статус crypto identity
   /// Возвращает (initialized, connected) — record из Matrix SDK
-  Future<({bool initialized, bool connected})?> checkCryptoIdentityState() async {
+  Future<({bool initialized, bool connected})?>
+      checkCryptoIdentityState() async {
     if (!_client.encryptionEnabled) return null;
     try {
       return await _client.getCryptoIdentityState();

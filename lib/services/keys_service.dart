@@ -28,7 +28,8 @@ class KeysService {
   static String? _password;
 
   /// Notifier для ошибок UIA (пароль отсутствует или unsupported stages)
-  static final ValueNotifier<String?> onUiaFailed = ValueNotifier<String?>(null);
+  static final ValueNotifier<String?> onUiaFailed =
+      ValueNotifier<String?>(null);
 
   KeysService(this._client);
 
@@ -78,7 +79,8 @@ class KeysService {
   /// Возвращает true если E2EE готово к использованию.
   Future<bool> setupCryptoIdentity() async {
     if (!_client.encryptionEnabled) {
-      debugPrint('[E2EE] encryptionEnabled is FALSE — vodozemac may not be initialized');
+      debugPrint(
+          '[E2EE] encryptionEnabled is FALSE — vodozemac may not be initialized');
       return false;
     }
 
@@ -91,41 +93,50 @@ class KeysService {
         // Проверяем: есть ли кросс-подпись уже на сервере?
         // Если да — это второе устройство, НЕ вызываем initCryptoIdentity
         // (чтобы не затереть существующие ключи)
-        final hasMasterKey = _client.userDeviceKeys[_client.userID]?.masterKey != null;
+        final hasMasterKey =
+            _client.userDeviceKeys[_client.userID]?.masterKey != null;
         if (hasMasterKey) {
           debugPrint('[E2EE] Cross-signing master key exists on server -> '
               'this is NOT a first device, falling through to restore');
         } else {
-        // Первая настройка — генерируем ключ восстановления
-        debugPrint('[E2EE] First-time setup: calling initCryptoIdentity()...');
-        debugPrint('[E2EE]   encryption available: ${_client.encryption != null}');
-        debugPrint('[E2EE]   keyManager enabled: ${_client.encryption?.keyManager.enabled}');
-        debugPrint('[E2EE]   crossSigning enabled: ${_client.encryption?.crossSigning.enabled}');
-        // Подписываемся на UIA-запросы для автопрохождения m.login.password
-        _handleUiaRequests();
-        try {
-          debugPrint('[E2EE] ⏳ initCryptoIdentity() started, waiting up to 300s...');
-          final recoveryKey = await _client
-              .initCryptoIdentity()
-              .timeout(const Duration(seconds: 300));
-          await persistRecoveryKey(recoveryKey, userId: _client.userID);
-          debugPrint('[E2EE] ✅ Crypto identity INITIALIZED');
-          debugPrint('[E2EE] 🔑 RECOVERY KEY (save this!): $recoveryKey');
-          debugPrint('[E2EE] keyManager enabled: ${_client.encryption?.keyManager.enabled}');
-          debugPrint('[E2EE] crossSigning enabled: ${_client.encryption?.crossSigning.enabled}');
-          return true;
-        } on TimeoutException catch (_) {
-          debugPrint('[E2EE] ❌ initCryptoIdentity TIMED OUT after 300s');
-          debugPrint('[E2EE] keyManager: ${_client.encryption?.keyManager.enabled}, '
-              'crossSigning: ${_client.encryption?.crossSigning.enabled}');
-          return false;
-        } catch (e, s) {
-          debugPrint('[E2EE] ❌ initCryptoIdentity THREW: $e');
-          debugPrint('[E2EE] Stack: $s');
-          return false;
-        } finally {
-          disposeUiaHandler();
-        }
+          // Первая настройка — генерируем ключ восстановления
+          debugPrint(
+              '[E2EE] First-time setup: calling initCryptoIdentity()...');
+          debugPrint(
+              '[E2EE]   encryption available: ${_client.encryption != null}');
+          debugPrint(
+              '[E2EE]   keyManager enabled: ${_client.encryption?.keyManager.enabled}');
+          debugPrint(
+              '[E2EE]   crossSigning enabled: ${_client.encryption?.crossSigning.enabled}');
+          // Подписываемся на UIA-запросы для автопрохождения m.login.password
+          _handleUiaRequests();
+          try {
+            debugPrint(
+                '[E2EE] ⏳ initCryptoIdentity() started, waiting up to 300s...');
+            final recoveryKey = await _client
+                .initCryptoIdentity()
+                .timeout(const Duration(seconds: 300));
+            await persistRecoveryKey(recoveryKey, userId: _client.userID);
+            debugPrint('[E2EE] ✅ Crypto identity INITIALIZED');
+            debugPrint('[E2EE] 🔑 RECOVERY KEY (save this!): $recoveryKey');
+            debugPrint(
+                '[E2EE] keyManager enabled: ${_client.encryption?.keyManager.enabled}');
+            debugPrint(
+                '[E2EE] crossSigning enabled: ${_client.encryption?.crossSigning.enabled}');
+            return true;
+          } on TimeoutException catch (_) {
+            debugPrint('[E2EE] ❌ initCryptoIdentity TIMED OUT after 300s');
+            debugPrint(
+                '[E2EE] keyManager: ${_client.encryption?.keyManager.enabled}, '
+                'crossSigning: ${_client.encryption?.crossSigning.enabled}');
+            return false;
+          } catch (e, s) {
+            debugPrint('[E2EE] ❌ initCryptoIdentity THREW: $e');
+            debugPrint('[E2EE] Stack: $s');
+            return false;
+          } finally {
+            disposeUiaHandler();
+          }
         } // close else (hasMasterKey == false)
       } // close if (!cryptoState.initialized)
 
@@ -135,7 +146,8 @@ class KeysService {
         _recoveryKey ??= await loadPersistedRecoveryKey(userId: _client.userID);
 
         if (_recoveryKey != null) {
-          debugPrint('[E2EE] Restoring crypto identity with saved recovery key...');
+          debugPrint(
+              '[E2EE] Restoring crypto identity with saved recovery key...');
           try {
             await _client.restoreCryptoIdentity(_recoveryKey!);
             debugPrint('[E2EE] ✅ Crypto identity RESTORED');
@@ -149,9 +161,12 @@ class KeysService {
         }
 
         // Нет валидного ключа — graceful degradation
-        debugPrint('[E2EE] ⚠️ No recovery key available. Device will be untrusted.');
-        debugPrint('[E2EE] E2EE works for new messages. Old messages may not decrypt.');
-        debugPrint('[E2EE] User should manually enter recovery key or reset encryption.');
+        debugPrint(
+            '[E2EE] ⚠️ No recovery key available. Device will be untrusted.');
+        debugPrint(
+            '[E2EE] E2EE works for new messages. Old messages may not decrypt.');
+        debugPrint(
+            '[E2EE] User should manually enter recovery key or reset encryption.');
         return false;
       }
 
@@ -187,7 +202,8 @@ class KeysService {
       }
       if (attempt < maxAttempts) {
         final delay = Duration(seconds: 2 * (1 << (attempt - 1))); // 2s, 4s, 8s
-        debugPrint('[E2EE] setupCryptoIdentity FAILED, retry in ${delay.inSeconds}s...');
+        debugPrint(
+            '[E2EE] setupCryptoIdentity FAILED, retry in ${delay.inSeconds}s...');
         await Future.delayed(delay);
       }
     }
@@ -209,9 +225,10 @@ class KeysService {
         // Гарантируем, что все inbound sessions загружены в бэкап
         try {
           await km.uploadInboundGroupSessions(skipIfInProgress: true);
-        } catch (_) { /* non-critical */ }
+        } catch (_) {/* non-critical */}
       } else if (kmEnabled && !kmCached) {
-        debugPrint('[E2EE] ⚠️ Key backup exists on server but key not cached locally. '
+        debugPrint(
+            '[E2EE] ⚠️ Key backup exists on server but key not cached locally. '
             'May need recovery key to restore.');
       } else {
         debugPrint('[E2EE] ⚠️ Key backup NOT enabled on server. '
@@ -284,7 +301,7 @@ class KeysService {
           final lastEvent = room.lastEvent;
           if (lastEvent != null &&
               (lastEvent.type == EventTypes.Encrypted ||
-               lastEvent.messageType == MessageTypes.BadEncrypted)) {
+                  lastEvent.messageType == MessageTypes.BadEncrypted)) {
             debugPrint('[E2EE] Requesting key for room ${room.id}');
             await lastEvent.requestKey();
             requested++;
@@ -312,9 +329,11 @@ class KeysService {
   /// Secure storage instance (cross-platform encrypted/plaintext depending on platform)
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
-    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock_this_device),
+    iOptions: IOSOptions(
+        accessibility: KeychainAccessibility.first_unlock_this_device),
     lOptions: LinuxOptions(),
-    mOptions: MacOsOptions(accessibility: KeychainAccessibility.first_unlock_this_device),
+    mOptions: MacOsOptions(
+        accessibility: KeychainAccessibility.first_unlock_this_device),
     wOptions: WindowsOptions(),
   );
 
@@ -399,7 +418,8 @@ class KeysService {
         );
       } else {
         debugPrint('[E2EE] UIA: unsupported stages: ${request.nextStages}');
-        onUiaFailed.value = 'Сервер запросил неподдерживаемый метод авторизации: '
+        onUiaFailed.value =
+            'Сервер запросил неподдерживаемый метод авторизации: '
             '${request.nextStages.join(', ')}. Настройка E2EE не удалась.';
       }
     });

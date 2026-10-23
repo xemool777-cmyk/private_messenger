@@ -28,6 +28,7 @@ jobs:
       - name: Установка Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.41.9'
           channel: stable
           cache: true
 
@@ -45,8 +46,8 @@ jobs:
       - name: Статический анализ
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Тесты
-        run: flutter test --reporter expanded
+      - name: Тесты (браузерный раннер — matrix/web не собираются на VM)
+        run: flutter test --platform chrome --reporter expanded
 
   # ─────────────────────────────────────────────────────────────
   # 2. Сборка Android (release APK как артефакт)
@@ -69,6 +70,7 @@ jobs:
       - name: Установка Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.41.9'
           channel: stable
           cache: true
 

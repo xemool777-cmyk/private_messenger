@@ -8,7 +8,8 @@ import 'package:web/web.dart' as web;
 external JSPromise<JSAny?> _registerPushJS();
 
 @JS('sendSubscriptionToGateway')
-external JSPromise<JSBoolean> _sendSubscriptionToGatewayJS(JSObject subscription);
+external JSPromise<JSBoolean> _sendSubscriptionToGatewayJS(
+    JSObject subscription);
 
 @JS('unregisterPush')
 external JSPromise<JSAny?> _unregisterPushJS();
@@ -21,8 +22,7 @@ external JSPromise<JSAny?> _unregisterPushJS();
 /// 3. Отправляет подписку в push gateway
 /// 4. Регистрирует pusher на Conduit через Matrix API (postPusher)
 class PushSubscriptionService {
-  static final PushSubscriptionService _instance =
-      PushSubscriptionService._();
+  static final PushSubscriptionService _instance = PushSubscriptionService._();
   static PushSubscriptionService get instance => _instance;
   PushSubscriptionService._();
 
@@ -133,8 +133,7 @@ class PushSubscriptionService {
     }
   }
 
-  Future<void> _registerPusherOnConduit(
-      Client client, String pushkey) async {
+  Future<void> _registerPusherOnConduit(Client client, String pushkey) async {
     try {
       final deviceName = _detectDeviceName();
       await client.postPusher(

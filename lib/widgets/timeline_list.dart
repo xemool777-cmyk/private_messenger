@@ -131,8 +131,7 @@ class TimelineList extends StatelessWidget {
 
         // ===== Date header: показываем, если день сменился =====
         final showDateHeader = index == events.length - 1 ||
-            events[index + 1].originServerTs.day !=
-                event.originServerTs.day;
+            events[index + 1].originServerTs.day != event.originServerTs.day;
 
         // ===== Поиск repliedEvent по eventId в timeline =====
         Event? repliedEvent;

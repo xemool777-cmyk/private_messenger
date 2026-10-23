@@ -58,7 +58,8 @@ class AuthService {
       );
       debugPrint('[Matrix] Login SUCCESS, userId: ${_client.userID}');
     } on MatrixException catch (e) {
-      debugPrint('[Matrix] Login MatrixException: ${e.error}, errcode: ${e.errcode}');
+      debugPrint(
+          '[Matrix] Login MatrixException: ${e.error}, errcode: ${e.errcode}');
       if (e.errcode == 'M_FORBIDDEN' || e.errcode == 'M_USER_IN_USE') {
         debugPrint('[Matrix] Trying registration...');
         await _client.register(
@@ -87,7 +88,8 @@ class AuthService {
     debugPrint('[Matrix] AccountData synced');
 
     // E2EE: проверяем encryptionEnabled и настраиваем crypto identity
-    debugPrint('[Matrix] encryptionEnabled after login: ${_client.encryptionEnabled}');
+    debugPrint(
+        '[Matrix] encryptionEnabled after login: ${_client.encryptionEnabled}');
 
     if (_client.encryptionEnabled && _keys != null) {
       debugPrint('[E2EE] Setting up crypto identity (with retry)...');
@@ -115,14 +117,17 @@ class AuthService {
       // Регистрируем push-подписку при восстановлении сессии
       await NotificationService.instance.setupPushSubscription(_client);
 
-      debugPrint('[Matrix] Session restored: encryptionEnabled = ${_client.encryptionEnabled}');
+      debugPrint(
+          '[Matrix] Session restored: encryptionEnabled = ${_client.encryptionEnabled}');
 
       // E2EE: проверяем и настраиваем crypto identity
       if (_client.encryptionEnabled && _keys != null) {
-        debugPrint('[E2EE] Setting up crypto identity for restored session (with retry)...');
+        debugPrint(
+            '[E2EE] Setting up crypto identity for restored session (with retry)...');
         final e2eeReady = await _keys.setupCryptoIdentityWithRetry();
         if (e2eeReady) {
-          debugPrint('[Matrix] E2EE OK after session restore. Identity: ${_client.identityKey}');
+          debugPrint(
+              '[Matrix] E2EE OK after session restore. Identity: ${_client.identityKey}');
         } else {
           debugPrint('[Matrix] E2EE setup FAILED after session restore');
         }

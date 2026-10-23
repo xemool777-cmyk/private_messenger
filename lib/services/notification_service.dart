@@ -11,7 +11,8 @@ class NotificationService {
   bool _initialized = false;
 
   final _notificationPayloadController = StreamController<String>.broadcast();
-  Stream<String> get onNotificationTapped => _notificationPayloadController.stream;
+  Stream<String> get onNotificationTapped =>
+      _notificationPayloadController.stream;
 
   Future<void> init() async {
     if (_initialized) return;
