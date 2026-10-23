@@ -62,8 +62,8 @@ class WebAudioPlayer {
     );
   }
 
-  double get duration => _element.duration;
-  double get currentTime => _element.currentTime;
+  double get duration => _element.duration.toDouble();
+  double get currentTime => _element.currentTime.toDouble();
   bool get isPaused => _element.paused;
 
   void load() => _element.load();

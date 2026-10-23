@@ -779,7 +779,7 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
       setState(() {
         _duration = Duration(milliseconds: (dur * 1000).round());
         _position = Duration(milliseconds: (pos * 1000).round());
-        _isPlaying = !_htmlAudio!.paused;
+        _isPlaying = !_htmlAudio!.isPaused;
         _isInitialized = true;
       });
     }
