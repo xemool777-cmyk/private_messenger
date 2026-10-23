@@ -103,8 +103,8 @@ class MatrixService {
     // 8. E2EE диагностика
     debugPrint('[INIT] encryptionEnabled = ${_client.encryptionEnabled}');
     if (_client.encryptionEnabled) {
-      debugPrint('[Matrix] Identity key: ${_client.identityKey}');
-      debugPrint('[Matrix] Fingerprint key: ${_client.fingerprintKey}');
+      // E2EE диагностика (identity и fingerprint залогированы выше, не дублируем)
+      // Отключаем вывод ключей в лог — security: ключи не должны логироваться в production
     }
 
     // 9. Слушаем ошибки UIA (пароль недоступен)

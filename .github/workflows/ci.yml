@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # 1. Статический анализ и тесты Flutter
+  # ─────────────────────────────────────────────────────────────
+  flutter-analyze-test:
+    name: Flutter · анализ и тесты
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Получение кода
+        uses: actions/checkout@v4
+
+      - name: Установка Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Версия инструментов
+        run: |
+          flutter --version
+          dart --version
+
+      - name: Зависимости
+        run: flutter pub get
+
+      - name: Проверка форматирования
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Статический анализ
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Тесты
+        run: flutter test --reporter expanded
+
+  # ─────────────────────────────────────────────────────────────
+  # 2. Сборка Android (release APK как артефакт)
+  # ─────────────────────────────────────────────────────────────
+  build-android:
+    name: Сборка · Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: flutter-analyze-test
+    steps:
+      - name: Получение кода
+        uses: actions/checkout@v4
+
+      - name: Установка Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Установка Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Зависимости
+        run: flutter pub get
+
+      - name: Сборка APK
+        run: flutter build apk --release --no-tree-shake-icons
+
+      - name: Выгрузка артефакта
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-release
+          path: build/app/outputs/flutter-apk/*.apk
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ─────────────────────────────────────────────────────────────
+  # 3. Push-гейтвей (Node.js)
+  # ─────────────────────────────────────────────────────────────
+  push-gateway:
+    name: Push-гейтвей · сборка и аудит
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: push-gateway
+    steps:
+      - name: Получение кода
+        uses: actions/checkout@v4
+
+      - name: Установка Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: push-gateway/package-lock.json
+
+      - name: Зависимости (строго по lock-файлу)
+        run: npm ci
+
+      - name: Синтаксическая проверка
+        run: node --check server.js
+
+      - name: Аудит зависимостей
+        run: npm audit --audit-level=high
+
+  # ─────────────────────────────────────────────────────────────
+  # 4. Проверка на утечку секретов
+  # ─────────────────────────────────────────────────────────────
+  secret-scan:
+    name: Безопасность · поиск секретов
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Получение кода (полная история)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Проверка на секреты
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
