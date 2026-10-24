@@ -78,7 +78,7 @@ jobs:
         run: |
           set -e
           test -f build/web/manifest.json || { echo "НЕТ manifest.json"; exit 1; }
-          test -f build/web/flutter_service_worker.js || { echo "НЕТ service worker"; exit 1; }
+          test -f build/web/sw.js || { echo "НЕТ sw.js (свой service worker)"; exit 1; }
           test -f build/web/main.dart.js || { echo "НЕТ main.dart.js"; exit 1; }
           python3 - <<'PYEOF'
           import json, sys

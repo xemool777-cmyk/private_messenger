@@ -44,6 +44,21 @@
 
   <!-- Flutter bootstrap — включает flutter.js, buildConfig и auto-call _flutter.loader.load() -->
   <script src="flutter_bootstrap.js" defer></script>
+
+  <!-- PWA: свой service worker (flutter_service_worker.js в 3.41 сам себя удаляет) -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js')
+          .then(function (reg) {
+            console.log('[PWA] service worker зарегистрирован:', reg.scope);
+          })
+          .catch(function (e) {
+            console.error('[PWA] регистрация service worker не удалась:', e);
+          });
+      });
+    }
+  </script>
 </head>
 <body>
 </body>
