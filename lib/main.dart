@@ -70,26 +70,7 @@ void main() async {
     debugPrint('[INIT] Creating MatrixService...');
     final matrixService = MatrixService();
 
-    debugPrint('[INIT] Calling matrixService.init()...');
-    try {
-      await matrixService.init();
-      debugPrint('[INIT] matrixService.init() OK');
-    } catch (e) {
-      debugPrint('[INIT] matrixService.init() FAILED: $e');
-    }
-
-    if (!KeysService.vodozemacReady) {
-      debugPrint('═══════════════════════════════════════════════════════');
-      debugPrint('⚠️  VODOZEMAC NOT INITIALIZED — E2EE WILL NOT WORK');
-      debugPrint('   Web: check that olm.wasm is in web/pkg/ directory');
-      debugPrint('   Native: check libolm.so is bundled correctly');
-      debugPrint('═══════════════════════════════════════════════════════');
-    }
-
-    // Разблокируем аудио-контекст (для рингтона входящих звонков)
-    CallService.unlockAudio();
-
-    debugPrint('[INIT] Running app...');
+    debugPrint('[INIT] Running app immediately (init in background)...');
     runApp(MyApp(matrixService: matrixService));
   }, (error, stack) {
     debugPrint('[ERROR] UNHANDLED ASYNC: $error\n$stack');
@@ -106,6 +87,8 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   StreamSubscription? _notifSub;
+  bool _initializing = true;
+  Object? _initError;
 
   @override
   void initState() {
@@ -115,6 +98,48 @@ class _MyAppState extends State<MyApp> {
         NotificationService.instance.onNotificationTapped.listen((roomId) {
       _openChatFromNotification(roomId);
     });
+    // Стартуем инициализацию Matrix в фоне после отрисовки первого кадра,
+    // чтобы интерфейс (экран загрузки) появился сразу.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_initMatrix());
+    });
+  }
+
+  Future<void> _initMatrix() async {
+    if (!mounted) return;
+    setState(() {
+      _initializing = true;
+      _initError = null;
+    });
+
+    debugPrint('[INIT] Calling matrixService.init()...');
+    try {
+      await widget.matrixService.init();
+      debugPrint('[INIT] matrixService.init() OK');
+
+      if (!KeysService.vodozemacReady) {
+        debugPrint('═══════════════════════════════════════════════════════');
+        debugPrint('⚠️  VODOZEMAC NOT INITIALIZED — E2EE WILL NOT WORK');
+        debugPrint('   Web: check that olm.wasm is in web/pkg/ directory');
+        debugPrint('   Native: check libolm.so is bundled correctly');
+        debugPrint('═══════════════════════════════════════════════════════');
+      }
+
+      // Разблокируем аудио-контекст (для рингтона входящих звонков)
+      CallService.unlockAudio();
+
+      if (!mounted) return;
+      setState(() {
+        _initializing = false;
+      });
+    } catch (e, stack) {
+      debugPrint('[INIT] matrixService.init() FAILED: $e\n$stack');
+      if (!mounted) return;
+      setState(() {
+        _initializing = false;
+        _initError = e;
+      });
+    }
   }
 
   @override
@@ -125,6 +150,7 @@ class _MyAppState extends State<MyApp> {
 
   /// Открыть чат при нажатии на уведомление
   void _openChatFromNotification(String roomId) {
+    if (_initializing || _initError != null) return;
     final client = widget.matrixService.client;
     final room = client.getRoomById(roomId);
     if (room == null) return;
@@ -164,7 +190,78 @@ class _MyAppState extends State<MyApp> {
           foregroundColor: Colors.white,
         ),
       ),
-      home: LoginPage(matrixService: widget.matrixService),
+      home: _initializing
+          ? const _StartupLoadingScreen()
+          : _initError != null
+              ? _StartupErrorScreen(
+                  error: _initError!,
+                  onRetry: () => unawaited(_initMatrix()),
+                )
+              : LoginPage(matrixService: widget.matrixService),
+    );
+  }
+}
+
+class _StartupLoadingScreen extends StatelessWidget {
+  const _StartupLoadingScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Подключение к серверу...'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StartupErrorScreen extends StatelessWidget {
+  final Object error;
+  final VoidCallback onRetry;
+
+  const _StartupErrorScreen({required this.error, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline, size: 56, color: Colors.red),
+                const SizedBox(height: 16),
+                const Text(
+                  'Не удалось подключиться',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '$error',
+                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Повторить'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
