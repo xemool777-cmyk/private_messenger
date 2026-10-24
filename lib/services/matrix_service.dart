@@ -96,13 +96,8 @@ class MatrixService {
       } catch (e) {
         failedSteps++;
         print('[INIT] client fallback ошибка: $e');
-        try {
-          client = Client('PrivateMessenger');
-          print('[INIT] client minimal fallback ok');
-        } catch (e2) {
-          failedSteps++;
-          print('[INIT] client minimal fallback ошибка: $e2');
-        }
+        // Без базы Client создать нельзя (database обязателен в SDK 7.x):
+        // оставляем client == null — UI покажет ошибку и кнопку «Повторить».
       }
     }
 

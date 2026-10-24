@@ -31,6 +31,18 @@
     window.addEventListener('unhandledrejection', function (e) {
       window.__errs.push('reject: ' + String(e.reason && e.reason.message ? e.reason.message : e.reason));
     });
+    // Перехват консоли: print() из Dart и ошибки движка видны программно
+    window.__logs = [];
+    ['log', 'warn', 'error', 'info'].forEach(function (lvl) {
+      var orig = console[lvl].bind(console);
+      console[lvl] = function () {
+        try {
+          window.__logs.push(lvl + ': ' + Array.prototype.map.call(arguments, String).join(' ').slice(0, 300));
+          if (window.__logs.length > 200) window.__logs.shift();
+        } catch (e) {}
+        orig.apply(console, arguments);
+      };
+    });
   </script>
 
   <!-- Olm (E2EE library for Matrix) — загружаем но не блокируем старт -->

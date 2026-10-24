@@ -1,0 +1,18 @@
+:8089 {
+	root * /srv
+	encode gzip
+
+	# COOP/COEP обязательны для SharedArrayBuffer — без них Rust-wasm (vodozemac,
+	# flutter_rust_bridge) на web не инициализируется, и E2EE выключается.
+	header {
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Embedder-Policy "require-corp"
+		Cross-Origin-Resource-Policy "cross-origin"
+		Service-Worker-Allowed "/"
+		Cache-Control "no-store"
+	}
+
+	# SPA: любой путь отдаёт index.html
+	try_files {path} /index.html
+	file_server
+}
