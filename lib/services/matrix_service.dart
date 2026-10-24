@@ -33,92 +33,223 @@ class MatrixService {
   static String get serverName => AppConfig.serverName;
   static String buildUserId(String username) => AppConfig.buildUserId(username);
 
-  /// Инициализация: создаёт клиент и все подсервисы
+  /// Инициализация: создаёт клиент и все подсервисы.
+  ///
+  /// Каждый шаг ограничен таймаутом и не прерывает инициализацию целиком:
+  /// при сбое шага приложение продолжает работу в деградированном режиме.
   Future<void> init() async {
+    const stepTimeout = Duration(seconds: 10);
+    var failedSteps = 0;
+
     // 1. Инициализируем vodozemac (нативные библиотеки / WASM)
-    debugPrint('[INIT] Step 1: Initializing vodozemac...');
-    await KeysService.ensureVodozemacInit();
-    debugPrint('[INIT] vodozemac OK');
-
-    // 2. Создаём Matrix клиент с базой данных и нативными реализациями
-    debugPrint('[INIT] Step 2: Creating Client with NativeImplementations...');
-    final db = await MatrixSdkDatabase.init('private_messenger_db');
-    _client = Client(
-      'PrivateMessenger',
-      database: db,
-      nativeImplementations: KeysService.createNativeImplementations(),
-    );
-    debugPrint('[INIT] Client created');
-
-    // 3. Инициализация клиента
-    debugPrint('[INIT] Step 3: Client.init()...');
     try {
-      await _client.init();
-      debugPrint('[INIT] Client.init() OK');
+      await KeysService.ensureVodozemacInit().timeout(stepTimeout);
+      print('[INIT] vodozemac ok');
+    } on TimeoutException {
+      failedSteps++;
+      print('[INIT] vodozemac timeout — продолжаем без E2EE');
     } catch (e) {
-      debugPrint('[Matrix] Client.init() error: $e');
+      failedSteps++;
+      print('[INIT] vodozemac ошибка: $e — продолжаем без E2EE');
     }
 
-    // 4. Создаём подсервисы (KeysService первый — нужен AuthService)
-    keys = KeysService(_client);
-    auth = AuthService(_client, keys: keys);
-    media = MediaService(_client);
-    call = CallService(_client);
-    sync = SyncService(_client, keys: keys, callService: call);
+    // 2. База данных. При сбое создаём Client без database.
+    dynamic db;
+    try {
+      db = await MatrixSdkDatabase.init('private_messenger_db')
+          .timeout(stepTimeout);
+      print('[INIT] database ok');
+    } on TimeoutException {
+      failedSteps++;
+      db = null;
+      print('[INIT] database timeout — создаём Client без базы данных');
+    } catch (e) {
+      failedSteps++;
+      db = null;
+      print(
+          '[INIT] database ошибка: $e — создаём Client без базы данных');
+    }
 
-    debugPrint('[INIT] Sub-services created');
-    debugPrint('[INIT] Initializing CallService...');
-    call.init();
-    debugPrint('[INIT] CallService OK');
+    // 3. Создаём Matrix клиент с базой данных и нативными реализациями
+    Client? client;
+    try {
+      client = await Future<Client>.sync(
+        () => Client(
+          'PrivateMessenger',
+          database: db,
+          nativeImplementations: KeysService.createNativeImplementations(),
+        ),
+      ).timeout(stepTimeout);
+      print('[INIT] client ok');
+    } on TimeoutException {
+      failedSteps++;
+      print('[INIT] client timeout');
+    } catch (e) {
+      failedSteps++;
+      print('[INIT] client ошибка: $e — пробуем без native implementations');
+    }
 
-    // 5. Если уже залогинен — переподключаемся и восстанавливаем сессию
-    if (_client.isLogged()) {
-      debugPrint('[INIT] Existing session detected, reconnecting...');
+    if (client == null) {
       try {
-        await _client.checkHomeserver(Uri.parse(AppConfig.homeserverUrl));
-        debugPrint('[Matrix] Homeserver reconnected for existing session');
+        client = Client('PrivateMessenger', database: db);
+        print('[INIT] client fallback ok');
       } catch (e) {
-        debugPrint('[Matrix] Failed to reconnect homeserver: $e');
+        failedSteps++;
+        print('[INIT] client fallback ошибка: $e');
+        try {
+          client = Client('PrivateMessenger');
+          print('[INIT] client minimal fallback ok');
+        } catch (e2) {
+          failedSteps++;
+          print('[INIT] client minimal fallback ошибка: $e2');
+        }
       }
-
-      // Восстанавливаем сессию
-      await auth.resumeSession();
     }
 
-    // 6. Запускаем синхронизацию ДО crypto init — SDK нужно знать state сервера
-    debugPrint('[INIT] Starting sync before crypto init...');
-    sync.startListening();
-    // Даём sync'у время получить первый state
-    await Future.delayed(const Duration(seconds: 3));
+    if (client == null) {
+      print('[INIT] завершено, шагов с ошибкой: $failedSteps');
+      return;
+    }
+    _client = client;
 
-    // 7. Настраиваем crypto identity с ретраем и key backup верификацией
-    debugPrint('[INIT] Setting up crypto identity (with retry)...');
-    final e2eeReady = await keys.setupCryptoIdentityWithRetry();
-    if (e2eeReady) {
-      debugPrint('[INIT] E2EE is ready');
+    // 4. Инициализация клиента
+    try {
+      await _client.init().timeout(stepTimeout);
+      print('[INIT] client.init ok');
+    } on TimeoutException {
+      failedSteps++;
+      print('[INIT] client.init timeout — продолжаем');
+    } catch (e) {
+      failedSteps++;
+      print('[INIT] client.init ошибка: $e — продолжаем');
+    }
+
+    // 5. Создаём подсервисы (KeysService первый — нужен AuthService)
+    try {
+      keys = KeysService(_client);
+      auth = AuthService(_client, keys: keys);
+      media = MediaService(_client);
+      call = CallService(_client);
+      sync = SyncService(_client, keys: keys, callService: call);
+      print('[INIT] sub-services ok');
+    } catch (e) {
+      failedSteps++;
+      print('[INIT] sub-services ошибка: $e');
+    }
+
+    // 6. Инициализируем CallService
+    try {
+      await Future<void>.sync(() => call.init()).timeout(stepTimeout);
+      print('[INIT] call.init ok');
+    } on TimeoutException {
+      failedSteps++;
+      print('[INIT] call.init timeout — продолжаем');
+    } catch (e) {
+      failedSteps++;
+      print('[INIT] call.init ошибка: $e — продолжаем');
+    }
+
+    // 7. Если уже залогинен — переподключаемся и восстанавливаем сессию
+    if (_client.isLogged()) {
+      try {
+        await _client
+            .checkHomeserver(Uri.parse(AppConfig.homeserverUrl))
+            .timeout(stepTimeout);
+        print('[INIT] homeserver reconnect ok');
+      } on TimeoutException {
+        failedSteps++;
+        print('[INIT] homeserver reconnect timeout — продолжаем');
+      } catch (e) {
+        failedSteps++;
+        print('[INIT] homeserver reconnect ошибка: $e — продолжаем');
+      }
+
+      try {
+        await auth.resumeSession().timeout(stepTimeout);
+        print('[INIT] session resume ok');
+      } on TimeoutException {
+        failedSteps++;
+        print('[INIT] session resume timeout — продолжаем');
+      } catch (e) {
+        failedSteps++;
+        print('[INIT] session resume ошибка: $e — продолжаем');
+      }
+    }
+
+    // 8. Запускаем синхронизацию ДО crypto init — SDK нужно знать state сервера.
+    // Вместо безусловной задержки ждём первый sync с таймаутом.
+    try {
+      sync.startListening();
+      if (_client.isLogged()) {
+        await _client.onSync.stream.first.timeout(stepTimeout);
+      }
+      print('[INIT] sync ok');
+    } on TimeoutException {
+      failedSteps++;
+      print('[INIT] sync timeout — продолжаем без ожидания первого sync');
+    } catch (e) {
+      failedSteps++;
+      print('[INIT] sync ошибка: $e — продолжаем');
+    }
+
+    // 9. Настраиваем crypto identity с ретраем и key backup верификацией.
+    // Без vodozemac E2EE недоступно — не ждём crypto-операции впустую.
+    if (!KeysService.vodozemacReady) {
+      print('[INIT] crypto identity ok (пропущено: E2EE выключено)');
     } else {
-      debugPrint('[INIT] E2EE setup FAILED — continuing without cross-signing');
-    }
-
-    // 8. E2EE диагностика
-    debugPrint('[INIT] encryptionEnabled = ${_client.encryptionEnabled}');
-    if (_client.encryptionEnabled) {
-      // E2EE диагностика (identity и fingerprint залогированы выше, не дублируем)
-      // Отключаем вывод ключей в лог — security: ключи не должны логироваться в production
-    }
-
-    // 9. Слушаем ошибки UIA (пароль недоступен)
-    KeysService.onUiaFailed.addListener(() {
-      final msg = KeysService.onUiaFailed.value;
-      if (msg != null) {
-        debugPrint('[E2EE] ⚠️ UIA FAILURE: $msg');
+      try {
+        final e2eeReady = await keys
+            .setupCryptoIdentityWithRetry()
+            .timeout(stepTimeout);
+        if (e2eeReady) {
+          print('[INIT] crypto identity ok');
+        } else {
+          failedSteps++;
+          print(
+              '[INIT] crypto identity ошибка: E2EE недоступно — продолжаем без шифрования');
+        }
+      } on TimeoutException {
+        failedSteps++;
+        print(
+            '[INIT] crypto identity timeout — продолжаем без шифрования');
+      } catch (e) {
+        failedSteps++;
+        print(
+            '[INIT] crypto identity ошибка: $e — продолжаем без шифрования');
       }
-    });
+    }
 
-    // 10. Инициализируем сервис уведомлений
-    await NotificationService.instance.init();
+    // 10. E2EE диагностика
+    debugPrint('[INIT] encryptionEnabled = ${_client.encryptionEnabled}');
+
+    // 11. Слушаем ошибки UIA (пароль недоступен)
+    try {
+      KeysService.onUiaFailed.addListener(() {
+        final msg = KeysService.onUiaFailed.value;
+        if (msg != null) {
+          debugPrint('[E2EE] ⚠️ UIA FAILURE: $msg');
+        }
+      });
+      print('[INIT] uia listener ok');
+    } catch (e) {
+      failedSteps++;
+      print('[INIT] uia listener ошибка: $e');
+    }
+
+    // 12. Инициализируем сервис уведомлений
+    try {
+      await NotificationService.instance.init().timeout(stepTimeout);
+      print('[INIT] notifications ok');
+    } on TimeoutException {
+      failedSteps++;
+      print('[INIT] notifications timeout — продолжаем');
+    } catch (e) {
+      failedSteps++;
+      print('[INIT] notifications ошибка: $e — продолжаем');
+    }
 
     debugPrint('[INIT] MatrixService initialization complete');
+    print('[INIT] завершено, шагов с ошибкой: $failedSteps');
   }
 
   /// Подключение к homeserver с ретраем
