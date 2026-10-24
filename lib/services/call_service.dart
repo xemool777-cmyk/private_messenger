@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:html' as html;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
@@ -8,6 +7,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 
 import '../screens/call_screen.dart';
 import 'notification_service.dart';
+import 'ringtone_service.dart';
 
 /// Сервис аудио/видео звонков.
 /// Реализует WebRTCDelegate, управляет VoIP-сессиями, рингтоном и UI вызова.
@@ -31,10 +31,8 @@ class CallService implements WebRTCDelegate {
   final _callStateController = StreamController<CallState>.broadcast();
   Stream<CallState> get onCallStateChanged => _callStateController.stream;
 
-  // ---- Ringtone / Ringback (web only) ----
-  html.AudioElement? _ringtone;
-  html.AudioElement? _ringbackTone;
-  static bool _audioUnlocked = false;
+  // ---- Ringtone / Ringback ----
+  final RingtoneService _ringtoneService = RingtoneService();
 
   CallService(this._client);
 
@@ -45,14 +43,7 @@ class CallService implements WebRTCDelegate {
 
   /// Разблокировать аудио-контекст (вызвать при первом жесте пользователя)
   static void unlockAudio() {
-    if (_audioUnlocked || !kIsWeb) return;
-    _audioUnlocked = true;
-    try {
-      final audio = html.AudioElement(
-          'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
-      audio.volume = 0;
-      audio.play().catchError((_) {});
-    } catch (_) {}
+    RingtoneService.unlockAudio();
   }
 
   // ==================== WebRTCDelegate ====================
@@ -69,51 +60,15 @@ class CallService implements WebRTCDelegate {
   }
 
   @override
-  Future<void> playRingtone() async {
-    if (!kIsWeb) return;
-    try {
-      _ringtone?.pause();
-      _ringtone = html.AudioElement(
-          'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAFAAADIQCcnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnP/7kMQAAHAAAQkAAAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//tkMQAAHAAAQkAAAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//uMRAAAHAAAlwAAFAAAACAAAcOHmDcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXAAABwcHBwd3d3eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eAHBwcHAAHBwcHAAAAA=');
-      _ringtone!.loop = true;
-      _ringtone!.volume = 1.0;
-      await _ringtone!.play();
-    } catch (e) {
-      debugPrint('[CALL] Ringtone play error: $e');
-    }
-  }
+  Future<void> playRingtone() => _ringtoneService.playRingtone();
 
   @override
-  Future<void> stopRingtone() async {
-    try {
-      _ringtone?.pause();
-      _ringtone?.currentTime = 0;
-      _ringtone = null;
-    } catch (_) {}
-  }
+  Future<void> stopRingtone() => _ringtoneService.stopRingtone();
 
   /// Ringback tone — играет звонящему пока ожидает ответа (P2.9)
-  Future<void> playRingback() async {
-    if (!kIsWeb) return;
-    try {
-      _ringbackTone?.pause();
-      _ringbackTone = html.AudioElement(
-          'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAFAAADIQCcnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnP/7kMQAAHAAAQkAAAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//tkMQAAHAAAQkAAAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//uMRAAAHAAAlwAAFAAAACAAAcOHmDcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXAAABwcHBwd3d3eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eAHBwcHAAHBwcHAAAAA=');
-      _ringbackTone!.loop = true;
-      _ringbackTone!.volume = 1.0;
-      await _ringbackTone!.play();
-    } catch (e) {
-      debugPrint('[CALL] Ringback play error: $e');
-    }
-  }
+  Future<void> playRingback() => _ringtoneService.playRingback();
 
-  Future<void> stopRingback() async {
-    try {
-      _ringbackTone?.pause();
-      _ringbackTone?.currentTime = 0;
-      _ringbackTone = null;
-    } catch (_) {}
-  }
+  Future<void> stopRingback() => _ringtoneService.stopRingback();
 
   @override
   Future<void> registerListeners(CallSession session) async {
@@ -317,15 +272,9 @@ class CallService implements WebRTCDelegate {
   bool _speakerphoneOn = false;
   bool get isSpeakerphoneOn => _speakerphoneOn;
 
-  /// Регулирует громкость удалённого аудио через HTML audio elements
+  /// Регулирует громкость удалённого аудио через HTML audio/video элементы
   void _setRemoteAudioVolume(double volume) {
-    try {
-      // Увеличиваем громкость через HTML audio/video элементы
-      final elements = html.document.querySelectorAll('audio, video');
-      for (final el in elements) {
-        (el as html.MediaElement).volume = volume;
-      }
-    } catch (_) {}
+    _ringtoneService.setRemoteAudioVolume(volume);
   }
 
   // ==================== Internal ====================

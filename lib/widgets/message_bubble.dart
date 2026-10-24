@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:html' as html;
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:video_player/video_player.dart';
+import '../helpers/web_download.dart';
 import '../services/media_service.dart';
 import 'image_gallery.dart';
 
@@ -627,8 +628,8 @@ class _AudioPlayerWidget extends StatefulWidget {
 }
 
 class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
-  // --- Web: html.AudioElement ---
-  html.AudioElement? _htmlAudio;
+  // --- Web: WebAudioPlayer ---
+  WebAudioPlayer? _htmlAudio;
   String? _blobUrl;
 
   // --- Native: audioplayers AudioPlayer ---
@@ -731,44 +732,38 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
 
   /// Проверить, поддерживает ли браузер формат
   static bool _checkUnsupported(String mime) {
-    final test = html.AudioElement();
-    final result = test.canPlayType(mime);
-    test.remove();
-    return result.isEmpty; // '' значит не поддерживает
+    return !canPlayAudioType(mime);
   }
 
   /// Создать web AudioElement из байтов (не запускает play)
   void _createWebAudio(Uint8List bytes) {
     // Указываем MIME-тип — важно для Safari
     final mime = _actualMimeType ?? 'audio/mp4';
-    if (_blobUrl != null) html.Url.revokeObjectUrl(_blobUrl!);
+    if (_blobUrl != null) revokeObjectUrl(_blobUrl!);
     _htmlAudio?.remove();
 
-    final blob = html.Blob([bytes], mime);
-    _blobUrl = html.Url.createObjectUrlFromBlob(blob);
-    _htmlAudio = html.AudioElement(_blobUrl!)
-      ..onEnded.listen(_webOnEnded)
-      ..onError.listen(_webOnError)
-      ..load(); // начинаем буферизацию
+    _blobUrl = createObjectUrlFromBytes(bytes, mime);
+    _htmlAudio = WebAudioPlayer.fromUrl(
+      _blobUrl!,
+      onEnded: _webOnEnded,
+      onError: _webOnError,
+    )..load(); // начинаем буферизацию
   }
 
   /// Скачать аудио-файл (для неподдерживаемых форматов)
   void _downloadAudio() {
     if (_blobUrl == null) return;
-    final anchor = html.AnchorElement(href: _blobUrl!)
-      ..setAttribute('download',
-          widget.event.body.isNotEmpty ? widget.event.body : 'voice.weba')
-      ..style.display = 'none';
-    html.document.body?.append(anchor);
-    anchor.click();
-    anchor.remove();
+    downloadUrl(
+      _blobUrl!,
+      widget.event.body.isNotEmpty ? widget.event.body : 'voice.weba',
+    );
   }
 
   @override
   void dispose() {
     _progressTimer?.cancel();
     if (_blobUrl != null && kIsWeb) {
-      html.Url.revokeObjectUrl(_blobUrl!);
+      revokeObjectUrl(_blobUrl!);
     }
     _htmlAudio?.remove();
     _htmlAudio = null;
@@ -784,13 +779,13 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
       setState(() {
         _duration = Duration(milliseconds: (dur * 1000).round());
         _position = Duration(milliseconds: (pos * 1000).round());
-        _isPlaying = !_htmlAudio!.paused;
+        _isPlaying = !_htmlAudio!.isPaused;
         _isInitialized = true;
       });
     }
   }
 
-  void _webOnEnded(html.Event _) {
+  void _webOnEnded() {
     _progressTimer?.cancel();
     if (mounted)
       setState(() {
@@ -799,7 +794,7 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
       });
   }
 
-  void _webOnError(html.Event _) {
+  void _webOnError() {
     _progressTimer?.cancel();
     if (mounted)
       setState(() {
@@ -1063,45 +1058,8 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
       final bodyName = widget.event.body;
       final ext = bodyName.contains('.') ? bodyName.split('.').last : 'mp4';
       final mimeType = ext == 'webm' ? 'video/webm' : 'video/mp4';
-      final blob = html.Blob([bytes], mimeType);
-      final blobUrl = html.Url.createObjectUrlFromBlob(blob);
 
-      final video = html.VideoElement()
-        ..src = blobUrl
-        ..style.display = 'none'
-        ..preload = 'metadata';
-
-      html.document.body?.append(video);
-
-      final completer = Completer<String?>();
-      // Пытаемся извлечь кадр из середины видео
-      html.EventListener? onLoaded;
-      onLoaded = (_) {
-        video.currentTime = video.duration * 0.1; // ~10% от начала
-      };
-      video.onLoadedMetadata.listen(onLoaded);
-      video.onSeeked.listen((_) {
-        try {
-          final canvas = html.CanvasElement(width: 200, height: 140);
-          final ctx = canvas.context2D;
-          ctx.drawImageScaled(video, 0, 0, 200, 140);
-          final dataUrl = canvas.toDataUrl('image/jpeg', 0.7);
-          completer.complete(dataUrl);
-        } catch (_) {
-          completer.complete(null);
-        }
-      });
-      video.onError.listen((_) {
-        completer.complete(null);
-      });
-      // Таймаут 10 секунд
-      Timer(const Duration(seconds: 10), () {
-        if (!completer.isCompleted) completer.complete(null);
-      });
-
-      final dataUrl = await completer.future;
-      video.remove();
-      html.Url.revokeObjectUrl(blobUrl);
+      final dataUrl = await extractVideoThumbnail(bytes, mimeType);
 
       if (dataUrl != null && mounted) {
         setState(() => _thumbDataUrl = dataUrl);
@@ -1136,42 +1094,7 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
         final ext = bodyName.contains('.') ? bodyName.split('.').last : 'mp4';
         final mimeType = ext == 'webm' ? 'video/webm' : 'video/mp4';
 
-        final blob = html.Blob([bytes], mimeType);
-        final blobUrl = html.Url.createObjectUrlFromBlob(blob);
-
-        final video = html.VideoElement()
-          ..src = blobUrl
-          ..controls = true
-          ..autoplay = true
-          ..style.position = 'fixed'
-          ..style.top = '0'
-          ..style.left = '0'
-          ..style.width = '100%'
-          ..style.height = '100%'
-          ..style.zIndex = '2147483647'
-          ..style.backgroundColor = 'black';
-
-        void cleanup() {
-          video.pause();
-          video.remove();
-          html.Url.revokeObjectUrl(blobUrl);
-        }
-
-        video.onEnded.listen((_) => cleanup());
-        video.onError.listen((_) => cleanup());
-        html.document.onFullscreenChange.listen((_) {
-          if (html.document.fullscreenElement == null) {
-            cleanup();
-            html.document.onFullscreenChange.listen((_) {}); // remove listener
-          }
-        });
-
-        html.document.body?.append(video);
-        try {
-          video.requestFullscreen();
-        } catch (_) {
-          // iOS Safari не поддерживает Fullscreen API — оверлей работает сам
-        }
+        playVideoFullscreen(bytes, mimeType);
       } else {
         // Native: сохраняем во временный файл и открываем плеер
         final tempDir = Directory.systemTemp;
@@ -1321,7 +1244,7 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
   void dispose() {
     // Revoke blob URL to free memory
     if (widget.isBlob && widget.pathOrUrl.startsWith('blob:')) {
-      html.Url.revokeObjectUrl(widget.pathOrUrl);
+      revokeObjectUrl(widget.pathOrUrl);
     }
     _controller.dispose();
     super.dispose();
