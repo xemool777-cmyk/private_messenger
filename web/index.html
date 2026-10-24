@@ -22,6 +22,17 @@
   <title>Private Messenger</title>
   <link rel="manifest" href="manifest.json">
 
+  <!-- Диагностика: собираем ошибки страницы, чтобы читать их программно -->
+  <script>
+    window.__errs = [];
+    window.addEventListener('error', function (e) {
+      window.__errs.push('error: ' + (e.message || '') + ' @ ' + (e.filename || '').split('/').pop() + ':' + e.lineno);
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      window.__errs.push('reject: ' + String(e.reason && e.reason.message ? e.reason.message : e.reason));
+    });
+  </script>
+
   <!-- Olm (E2EE library for Matrix) — загружаем но не блокируем старт -->
   <script src="olm.js"></script>
   <script>

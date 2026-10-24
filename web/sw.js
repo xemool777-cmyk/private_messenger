@@ -7,7 +7,7 @@
 //  - навигация: network-first с фолбэком на кэшированный index.html (офлайн-старт)
 //  - статика (assets/, canvaskit/, иконки): cache-first с фоновым обновлением
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL_CACHE = `shell-${VERSION}`;
 const RUNTIME_CACHE = `runtime-${VERSION}`;
 
@@ -20,6 +20,11 @@ const SHELL_ASSETS = [
   './icons/Icon-192.png',
   './icons/Icon-512.png',
 ];
+
+// Точка входа НИКОГДА не отдаётся из кэша первой: после пересборки имя main.dart.js
+// не меняется, и cache-first показал бы старую сборку поверх нового index.html
+// (пустой экран). Эти пути всегда берутся из сети с фолбэком на кэш.
+const NETWORK_FIRST = ['./', './index.html', './main.dart.js', './flutter_bootstrap.js', './version.json'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -79,6 +84,30 @@ self.addEventListener('fetch', (event) => {
               status: 503,
               headers: { 'Content-Type': 'text/plain; charset=utf-8' },
             })
+          );
+        }
+      })(),
+    );
+    return;
+  }
+
+  // Точка входа (index, bootstrap, main.dart.js): сеть, при неудаче — кэш
+  const rel = './' + url.pathname.replace(/^\/+/, '');
+  if (url.pathname === '/' || NETWORK_FIRST.includes(rel)) {
+    event.respondWith(
+      (async () => {
+        try {
+          const fresh = await fetch(req);
+          if (fresh && fresh.ok) {
+            const cache = await caches.open(SHELL_CACHE);
+            cache.put(req, fresh.clone());
+          }
+          return fresh;
+        } catch (e) {
+          return (
+            (await caches.match(req)) ||
+            (await caches.match('./index.html')) ||
+            new Response('Офлайн', { status: 504 })
           );
         }
       })(),
